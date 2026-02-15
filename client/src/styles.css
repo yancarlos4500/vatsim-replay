@@ -1,0 +1,102 @@
+:root { color-scheme: dark; }
+body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background: #0b0f14; color: #e6edf3; }
+a { color: inherit; }
+.panel { position: relative; width: 340px; height: 100vh; flex-shrink: 0; background: rgba(12, 18, 26, 0.88); border-right: 1px solid rgba(255,255,255,0.08); padding: 4px 8px 4px 4px; backdrop-filter: blur(10px); display: flex; flex-direction: column; gap: 2px; justify-content: space-between; }
+.row { display: flex; flex-direction: column; gap: 4px; align-items: stretch; padding: 0 12px; }
+.row > * { flex: 0 0 auto; }
+.label { font-size: 13px; opacity: 0.8; }
+select, input, button { background: #121a24; color: #e6edf3; border: 1px solid rgba(255,255,255,0.10); border-radius: 8px; padding: 4px 6px; font-size: 14px; }
+button { cursor: pointer; }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+small { opacity: 0.75; }
+.slider { width: 100%; max-width: 100%; }
+.mapWrap { height: 100vh; width: 100vw; display: flex; flex-direction: row; }
+.badge { display: inline-flex; gap: 3px; align-items: center; padding: 2px 4px; border-radius: 999px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08); font-size: 13px; }
+
+.planeDivIcon { background: transparent; border: none; }
+.planeMarker {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  transform: translate(-50%, -50%);
+  pointer-events: none; /* clicks pass through */
+  color: #e6edf3;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.7);
+}
+.planeIcon {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.55));
+}
+.planeLabel {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(12, 18, 26, 0.75);
+  border: 1px solid rgba(255,255,255,0.10);
+  white-space: nowrap;
+}
+
+.atcDivIcon { background: transparent; border: none; }
+.atcMarker {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  color: #ffd700;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.7);
+}
+.atcIcon {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.55));
+}
+.atcLabel {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(255, 215, 0, 0.15);
+  border: 1px solid rgba(255, 215, 0, 0.3);
+  white-space: nowrap;
+  color: #ffd700;
+}
+
+
+/* Always-visible ATC tooltip styling */
+.leaflet-tooltip.atcTooltip {
+  background: rgba(12, 18, 26, 0.9);
+  color: #ffd700;
+  border: 1px solid rgba(255, 215, 0, 0.35);
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 6px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+}
+
+
+.leaflet-tooltip-pane {
+  z-index: 650;
+}
+
+/* TRACON approach airspace styling */
+.leaflet-geojson-tracon {
+  stroke: #0099ff;
+  stroke-width: 1px;
+  stroke-dasharray: 5, 5;
+  fill: #0099ff;
+  fill-opacity: 0.02;
+}
+
+.badge input[type="checkbox"] { margin: 0 6px 0 0; transform: translateY(1px); }

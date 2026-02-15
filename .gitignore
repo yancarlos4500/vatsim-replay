@@ -1,0 +1,22 @@
+# Node
+node_modules/
+
+# Build outputs
+client/dist/
+server/dist/
+
+# SQLite and WAL/SHM
+server/data/*.sqlite
+server/data/*.sqlite-wal
+server/data/*.sqlite-shm
+server/data/*.db
+
+# Env
+server/.env
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
