@@ -157,7 +157,9 @@ export default function App() {
   const [tracon, setTracon] = useState(null);
   const [rangeStart, setRangeStart] = useState(null);
   const [rangeEnd, setRangeEnd] = useState(null);
+  const [mapBounds, setMapBounds] = useState(null);
   const planeIconCache = useRef(new Map());
+  const mapRef = useRef(null);
 
   const bounds = useMemo(() => {
     if (!meta?.minTs || !meta?.maxTs) return null;
@@ -365,6 +367,40 @@ useEffect(() => {
     if (mode !== "all") planeIconCache.current.clear();
   }, [mode]);
 
+  // Track map bounds for viewport filtering
+  useEffect(() => {
+    const map = mapRef.current?.leafletElement;
+    if (!map) return;
+
+    const handleMoveEnd = () => {
+      const b = map.getBounds();
+      setMapBounds({
+        north: b.getNorth(),
+        south: b.getSouth(),
+        east: b.getEast(),
+        west: b.getWest()
+      });
+    };
+
+    handleMoveEnd(); // Initial bounds
+    map.on("moveend", handleMoveEnd);
+    return () => map.off("moveend", handleMoveEnd);
+  }, []);
+
+  // Filter snapshot to only planes within map bounds
+  const visibleSnapshot = useMemo(() => {
+    if (!mapBounds || !snapshot.length) return snapshot;
+    return snapshot.filter(p => {
+      const { lat, lon } = p;
+      return (
+        lat >= mapBounds.south &&
+        lat <= mapBounds.north &&
+        lon >= mapBounds.west &&
+        lon <= mapBounds.east
+      );
+    });
+  }, [snapshot, mapBounds]);
+
 
   // Style GeoJSON features based on ATC online status
   const geojsonStyle = useCallback((feature) => {
@@ -435,14 +471,14 @@ useEffect(() => {
   }, [atcOnlineTracon]);
 
   const snapshotMarkers = useMemo(() => {
-    return snapshot.map((p) => (
+    return visibleSnapshot.map((p) => (
       <Marker
         key={`${p.callsign}-${p.ts}-${p.lat}-${p.lon}`}
         position={[p.lat, p.lon]}
         icon={getPlaneIcon(p.callsign, p.heading)}
       />
     ));
-  }, [snapshot, getPlaneIcon]);
+  }, [visibleSnapshot, getPlaneIcon]);
 
   return (
     <div className="mapWrap">
@@ -551,7 +587,7 @@ useEffect(() => {
         )}
       </div>
 
-      <MapContainer center={center} zoom={5} style={{ height: "100%", width: "100%" }}>
+      <MapContainer ref={mapRef} center={center} zoom={5} style={{ height: "100%", width: "100%" }}>
         <TileLayer
           attribution="&copy; OpenStreetMap contributors &copy; CARTO"
           url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
