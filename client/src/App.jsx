@@ -109,7 +109,7 @@ function buildAtcOnlineSets(rows) {
     const callsign = row.callsign.toUpperCase();
     const parts = callsign.split("_");
     const sectorCode = (parts[0] || "").toUpperCase();
-    const roleMatch = callsign.match(/_(APP|DEP|CTR)(?:$|_)/);
+    const roleMatch = callsign.match(/_(APP|DEP|CTR|FSS)(?:$|_)/);
     const role = roleMatch ? roleMatch[1] : (parts[parts.length - 1] || "").toUpperCase();
 
     if (role === "APP" || role === "DEP") {
@@ -127,6 +127,17 @@ function buildAtcOnlineSets(rows) {
         const upGeo = geojsonId.toUpperCase();
         airspace.add(upGeo);
         airspace.add(`${upGeo}_CTR`);
+      }
+    }
+
+    if (role === "FSS") {
+      if (sectorCode) airspace.add(sectorCode);
+      if (sectorCode) airspace.add(`${sectorCode}_FSS`);
+      const geojsonId = mapVatsimToGeojson(sectorCode);
+      if (geojsonId) {
+        const upGeo = geojsonId.toUpperCase();
+        airspace.add(upGeo);
+        airspace.add(`${upGeo}_FSS`);
       }
     }
   });
