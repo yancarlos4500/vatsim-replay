@@ -69,33 +69,30 @@ const sectorToGeojsonMap = {
   "BOS": "KZBW",  // Boston Center
   "NYC": "KZNY",  // New York Center
   "PHI": "KZPH",  // Philadelphia Center
-  "DCA": "KZDC",  // Washington Center
-  "ATL": "KZAT",  // Atlanta Center
+  "DC": "KZDC",  // Washington Center
+  "ATL": "KZTL",  // Atlanta Center
   "MIA": "KZMA",  // Miami Center
   "JAX": "KZJX",  // Jacksonville Center
+  "CLE": "KZOB",  // Cleveland Center
   "MEM": "KZME",  // Memphis Center
   "CHI": "KZAU",  // Chicago Center
-  "DEN": "KZCO",  // Denver Center
-  "DFW": "KZDL",  // Dallas-Fort Worth Center
+  "DEN": "KZDV",  // Denver Center
   "FTW": "KZFW",  // Fort Worth (same as Dallas)
-  "IAH": "KZHU",  // Houston Center
+  "HOU": "KZHU",  // Houston Center
   "ORD": "KZAU",  // Chicago (same as CHI)
-  "IND": "KZIB",  // Indianapolis Center
+  "IND": "KZID",  // Indianapolis Center
   "MSP": "KZMP",  // Minneapolis Center
-  "MCI": "KZLC",  // Kansas City Center
+  "SLC": "KZLC",  // Salt Lake City Center
   "LAX": "KZLA",  // Los Angeles Center
   "OAK": "KZOA",  // Oakland Center
   "SEA": "KZSE",  // Seattle Center
-  "LAS": "KZSW",  // Las Vegas Center
-  "SLC": "KZSL",  // Salt Lake City Center
   "PHO": "KZAB",  // Phoenix/Albuquerque Center
   "ABQ": "KZAB",  // Albuquerque Center
-  "ANC": "KZAK",  // Anchorage Center
+  "ZAK": "KZAK",  // Oakland Oceanic (ZAK sector)
   "HNL": "KZPP",  // Honolulu Center
   "ZBW": "KZBW",  // Boston Center (using Z-code directly)
   "ZNY": "KZNY",  // New York Center (using Z-code directly)
   "ZDC": "KZDC",  // Washington Center (using Z-code directly)
-  "ZAT": "KZAT",  // Atlanta Center (using Z-code directly)
   "SJU": "TJZS",  // San Juan Center
 };
 
