@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MapContainer, TileLayer, Marker, Polyline, GeoJSON } from "react-leaflet";
 import L from "leaflet";
 import { getMeta, getSnapshot, getCallsigns, getTrack, getAirspace, getAtcSnapshot, getTracon } from "./api";
@@ -84,7 +84,7 @@ const sectorToGeojsonMap = {
   "MSP": "KZMP",  // Minneapolis Center
   "MCI": "KZLC",  // Kansas City Center
   "LAX": "KZLA",  // Los Angeles Center
-  "SFO": "KZOA",  // Oakland Center
+  "OAK": "KZOA",  // Oakland Center
   "SEA": "KZSE",  // Seattle Center
   "LAS": "KZSW",  // Las Vegas Center
   "SLC": "KZSL",  // Salt Lake City Center
@@ -96,6 +96,7 @@ const sectorToGeojsonMap = {
   "ZNY": "KZNY",  // New York Center (using Z-code directly)
   "ZDC": "KZDC",  // Washington Center (using Z-code directly)
   "ZAT": "KZAT",  // Atlanta Center (using Z-code directly)
+  "SJU": "TJZS",  // San Juan Center
 };
 
 function mapVatsimToGeojson(vatsimCode) {
@@ -154,10 +155,9 @@ export default function App() {
   const [airspace, setAirspace] = useState(null);
   const [showTracon, setShowTracon] = useState(true);
   const [tracon, setTracon] = useState(null);
-  const [atcOnlineTracon, setAtcOnlineTracon] = useState(new Set());
-  const [atcOnlineAirspace, setAtcOnlineAirspace] = useState(new Set());
   const [rangeStart, setRangeStart] = useState(null);
   const [rangeEnd, setRangeEnd] = useState(null);
+  const planeIconCache = useRef(new Map());
 
   const bounds = useMemo(() => {
     if (!meta?.minTs || !meta?.maxTs) return null;
@@ -165,6 +165,11 @@ export default function App() {
   }, [meta]);
 
   const stepSeconds = meta?.pollIntervalSeconds ?? 15;
+
+  const { tracon: atcOnlineTracon, airspace: atcOnlineAirspace } = useMemo(
+    () => buildAtcOnlineSets(atcSnapshot),
+    [atcSnapshot]
+  );
 
 // Clamp current time into selected range
 useEffect(() => {
@@ -208,67 +213,49 @@ useEffect(() => {
 }, [playing]);
 
 useEffect(() => {
-  console.log(`[tracon] useEffect triggered: showTracon=${showTracon}, tracon=${tracon ? "loaded" : "null"}`);
   // If the toggle is off, do nothing. If tracon already has features, skip fetch.
   if (!showTracon) return;
   if (tracon && Array.isArray(tracon.features) && tracon.features.length > 0) return;
-  console.log(`[tracon] Fetching TRACON data...`);
   (async () => {
     try {
       let data = await getTracon();
-      console.log(`[tracon] Raw fetched data:`, data);
-      console.log(`[tracon] Top-level features: ${data?.features?.length || 0}`);
-      
+
       // Flatten nested features from various possible structures
       if (data?.features) {
         const allFeatures = [];
-        
+
         data.features.forEach((f, i) => {
-          console.log(`[tracon] Feature ${i}:`, {
-            type: f.type,
-            id: f.id,
-            name: f.properties?.name,
-            hasGeometry: !!f.geometry,
-            geometryType: f.geometry?.type,
-            propsKeys: Object.keys(f.properties || {})
-          });
-          
           // Add the feature itself if it has geometry
-          if (f.geometry && f.geometry.type !== 'GeometryCollection') {
+          if (f.geometry && f.geometry.type !== "GeometryCollection") {
             allFeatures.push(f);
           }
-          
+
           // Check multiple possible nested structure locations
           let nested = null;
           if (f.properties?.features && Array.isArray(f.properties.features)) {
             nested = f.properties.features;
-            console.log(`[tracon]   -> Found ${nested.length} nested features in properties.features`);
           } else if (f.properties?.Boundaries && Array.isArray(f.properties.Boundaries)) {
             nested = f.properties.Boundaries;
-            console.log(`[tracon]   -> Found ${nested.length} nested features in properties.Boundaries`);
           } else if (f.features && Array.isArray(f.features)) {
             nested = f.features;
-            console.log(`[tracon]   -> Found ${nested.length} nested features in features`);
           } else if (Array.isArray(f.geometry?.geometries)) {
             // Handle GeometryCollection
-            console.log(`[tracon]   -> Found GeometryCollection with ${f.geometry.geometries.length} geometries`);
             f.geometry.geometries.forEach((geom, gi) => {
               allFeatures.push({
-                type: 'Feature',
+                type: "Feature",
                 geometry: geom,
                 properties: f.properties || {},
                 id: `${f.id || i}-${gi}`
               });
             });
           }
-          
+
           // Add nested features
           if (nested) {
             nested.forEach((nestedFeat, ni) => {
-              console.log(`[tracon]     Nested ${ni}: name=${nestedFeat.properties?.name}, hasGeom=${!!nestedFeat.geometry}`);
               if (nestedFeat.geometry) {
                 allFeatures.push({
-                  type: 'Feature',
+                  type: "Feature",
                   geometry: nestedFeat.geometry,
                   properties: nestedFeat.properties || {},
                   id: nestedFeat.id || `${f.id || i}-nested-${ni}`
@@ -277,28 +264,16 @@ useEffect(() => {
             });
           }
         });
-        
-        console.log(`[tracon] Flattened to ${allFeatures.length} total features`);
-        allFeatures.forEach((f, i) => {
-          if (f.properties?.name?.includes('NY')) console.log(`[tracon] Feature ${i} (NY*):`, f.properties.name);
-        });
-        
+
         data = { ...data, features: allFeatures };
       }
-      
+
       setTracon(data);
     } catch (e) {
       console.error("tracon load failed", e);
     }
   })();
 }, [showTracon, tracon]);
-
-// Build ATC online set from the current replay snapshot
-useEffect(() => {
-  const next = buildAtcOnlineSets(atcSnapshot);
-  setAtcOnlineTracon(next.tracon);
-  setAtcOnlineAirspace(next.airspace);
-}, [atcSnapshot]);
 
   async function refreshSnapshot(ts) {
     setLoading(true);
@@ -373,11 +348,28 @@ useEffect(() => {
     return [18.4, -66.0];
   }, [snapshot]);
 
+  const getPlaneIcon = useCallback((callsign, heading) => {
+    const rounded = Number.isFinite(heading) ? Math.round(heading / 5) * 5 : 0;
+    const key = `${callsign}:${rounded}`;
+    const cache = planeIconCache.current;
+    let icon = cache.get(key);
+    if (!icon) {
+      icon = planeDivIcon(callsign, rounded);
+      cache.set(key, icon);
+      if (cache.size > 2000) cache.clear();
+    }
+    return icon;
+  }, []);
+
+  useEffect(() => {
+    if (mode !== "all") planeIconCache.current.clear();
+  }, [mode]);
+
 
   // Style GeoJSON features based on ATC online status
-  const geojsonStyle = (feature) => {
+  const geojsonStyle = useCallback((feature) => {
     // Check against the GeoJSON feature ID or TRACON prefix array
-    const featureId = (feature?.id || feature?.properties?.id || '').toString();
+    const featureId = (feature?.id || feature?.properties?.id || "").toString();
     let isOnline = featureId && atcOnlineAirspace.has(featureId.toUpperCase());
 
     // If feature has a `prefix` property (array of TRACON prefixes like "MDSD"),
@@ -394,12 +386,6 @@ useEffect(() => {
       }
     }
     
-    if (!window._debugStyleLogged) {
-      console.log(`[geojson-style] Sample feature ID: "${featureId}", isOnline: ${isOnline}`);
-      console.log(`[geojson-style] Current atcOnlineAirspace (${atcOnlineAirspace.size}):`, Array.from(atcOnlineAirspace).sort());
-      window._debugStyleLogged = true;
-    }
-    
     return {
       color: isOnline ? "#00ff00" : "#666666",
       weight: isOnline ? 2 : 1,
@@ -407,10 +393,10 @@ useEffect(() => {
       fillColor: isOnline ? "transparent" : "#000000",
       fillOpacity: isOnline ? 0 : 0.2
     };
-  };
+  }, [atcOnlineAirspace]);
 
   // Style TRACON approach boundaries
-  const traconStyle = (feature) => {
+  const traconStyle = useCallback((feature) => {
     // Check if this TRACON's ATC prefix is online
     const prefixes = feature?.properties?.prefix || feature?.properties?.prefixes || [];
     let isOnline = false;
@@ -446,7 +432,17 @@ useEffect(() => {
       fillColor: "#0099ff",
       fillOpacity: 0.02
     };
-  };
+  }, [atcOnlineTracon]);
+
+  const snapshotMarkers = useMemo(() => {
+    return snapshot.map((p) => (
+      <Marker
+        key={`${p.callsign}-${p.ts}-${p.lat}-${p.lon}`}
+        position={[p.lat, p.lon]}
+        icon={getPlaneIcon(p.callsign, p.heading)}
+      />
+    ));
+  }, [snapshot, getPlaneIcon]);
 
   return (
     <div className="mapWrap">
@@ -566,20 +562,11 @@ useEffect(() => {
         )}
 
         {showTracon && tracon && (
-          <>
-            {console.log(`[render] Rendering TRACON with ${tracon?.features?.length || 0} features`)}
-            <GeoJSON data={tracon} style={traconStyle} />
-          </>
+          <GeoJSON data={tracon} style={traconStyle} />
         )}
 
 
-        {mode === "all" && snapshot.map((p) => (
-          <Marker
-            key={`${p.callsign}-${p.ts}-${p.lat}-${p.lon}`}
-            position={[p.lat, p.lon]}
-            icon={planeDivIcon(p.callsign, p.heading)}
-          />
-        ))}
+        {mode === "all" && snapshotMarkers}
 
         {mode === "track" && track.length > 1 && (
           <Polyline positions={track} />
