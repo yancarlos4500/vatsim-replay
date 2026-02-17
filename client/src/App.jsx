@@ -100,6 +100,71 @@ function mapVatsimToGeojson(vatsimCode) {
   return sectorToGeojsonMap[vatsimCode] || null;
 }
 
+const featureBBoxCache = new WeakMap();
+
+function computeBBoxFromCoords(coords) {
+  let found = false;
+  const bbox = { west: Infinity, south: Infinity, east: -Infinity, north: -Infinity };
+
+  function walk(c) {
+    if (!c) return;
+    if (typeof c[0] === "number" && typeof c[1] === "number") {
+      const lon = c[0];
+      const lat = c[1];
+      if (!Number.isFinite(lon) || !Number.isFinite(lat)) return;
+      found = true;
+      if (lon < bbox.west) bbox.west = lon;
+      if (lon > bbox.east) bbox.east = lon;
+      if (lat < bbox.south) bbox.south = lat;
+      if (lat > bbox.north) bbox.north = lat;
+      return;
+    }
+    if (Array.isArray(c)) {
+      for (const item of c) walk(item);
+    }
+  }
+
+  walk(coords);
+  return found ? bbox : null;
+}
+
+function getFeatureBBox(feature) {
+  if (!feature) return null;
+  const cached = featureBBoxCache.get(feature);
+  if (cached) return cached;
+  const geom = feature.geometry;
+  if (!geom) return null;
+
+  let bbox = null;
+  if (geom.type === "GeometryCollection" && Array.isArray(geom.geometries)) {
+    for (const g of geom.geometries) {
+      const b = computeBBoxFromCoords(g?.coordinates);
+      if (!b) continue;
+      if (!bbox) bbox = { ...b };
+      else {
+        if (b.west < bbox.west) bbox.west = b.west;
+        if (b.east > bbox.east) bbox.east = b.east;
+        if (b.south < bbox.south) bbox.south = b.south;
+        if (b.north > bbox.north) bbox.north = b.north;
+      }
+    }
+  } else {
+    bbox = computeBBoxFromCoords(geom.coordinates);
+  }
+
+  if (bbox) featureBBoxCache.set(feature, bbox);
+  return bbox;
+}
+
+function bboxIntersectsBounds(bbox, bounds, padDeg = 0) {
+  if (!bbox || !bounds) return false;
+  const west = bounds.west - padDeg;
+  const east = bounds.east + padDeg;
+  const south = bounds.south - padDeg;
+  const north = bounds.north + padDeg;
+  return !(bbox.east < west || bbox.west > east || bbox.north < south || bbox.south > north);
+}
+
 function buildAtcOnlineSets(rows) {
   const tracon = new Set();
   const airspace = new Set();
@@ -409,6 +474,22 @@ useEffect(() => {
     });
   }, [snapshot, mapBounds]);
 
+  const visibleAirspace = useMemo(() => {
+    if (!airspace?.features || !mapBounds) return airspace;
+    const padDeg = 0.5;
+    const features = airspace.features.filter((f) => bboxIntersectsBounds(getFeatureBBox(f), mapBounds, padDeg));
+    if (features.length === airspace.features.length) return airspace;
+    return { ...airspace, features };
+  }, [airspace, mapBounds]);
+
+  const visibleTracon = useMemo(() => {
+    if (!tracon?.features || !mapBounds) return tracon;
+    const padDeg = 0.5;
+    const features = tracon.features.filter((f) => bboxIntersectsBounds(getFeatureBBox(f), mapBounds, padDeg));
+    if (features.length === tracon.features.length) return tracon;
+    return { ...tracon, features };
+  }, [tracon, mapBounds]);
+
 
   // Style GeoJSON features based on ATC online status
   const geojsonStyle = useCallback((feature) => {
@@ -601,12 +682,12 @@ useEffect(() => {
           url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
         />
 
-        {showAirspace && airspace && (
-          <GeoJSON data={airspace} style={geojsonStyle} />
+        {showAirspace && visibleAirspace && (
+          <GeoJSON data={visibleAirspace} style={geojsonStyle} />
         )}
 
-        {showTracon && tracon && (
-          <GeoJSON data={tracon} style={traconStyle} />
+        {showTracon && visibleTracon && (
+          <GeoJSON data={visibleTracon} style={traconStyle} />
         )}
 
 
