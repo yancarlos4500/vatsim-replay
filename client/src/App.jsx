@@ -67,8 +67,8 @@ function useInterval(cb, delay, enabled) {
 // Mapping of VATSIM sector codes to GeoJSON boundary IDs
 const sectorToGeojsonMap = {
   "BOS": "KZBW",  // Boston Center
+  "TOR": "CZYZ",  // Toronto Center
   "NYC": "KZNY",  // New York Center
-  "PHI": "KZPH",  // Philadelphia Center
   "DC": "KZDC",  // Washington Center
   "ATL": "KZTL",  // Atlanta Center
   "MIA": "KZMA",  // Miami Center

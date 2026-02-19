@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import fetch from "node-fetch";
-import { join, resolve } from "node:path";
+import { join, resolve, isAbsolute } from "node:path";
 import { existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -17,13 +17,32 @@ dotenv.config();
 const PORT = parseInt(process.env.PORT || "4000", 10);
 const POLL_INTERVAL_SECONDS = parseInt(process.env.POLL_INTERVAL_SECONDS || "15", 10);
 const RETENTION_HOURS = parseInt(process.env.RETENTION_HOURS || "24", 10);
-const DB_PATH = process.env.DB_PATH || "./data/vatsim.sqlite";
+function resolveDbPath() {
+  if (process.env.DB_PATH && process.env.DB_PATH.trim().length > 0) {
+    const configured = process.env.DB_PATH.trim();
+    return isAbsolute(configured) ? configured : resolve(join(__dirname, ".."), configured);
+  }
+
+  const railwayMountedPath = process.env.RAILWAY_VOLUME_MOUNT_PATH;
+  if (railwayMountedPath && railwayMountedPath.trim().length > 0) {
+    return join(railwayMountedPath.trim(), "vatsim.sqlite");
+  }
+
+  if (existsSync("/data")) {
+    return "/data/vatsim.sqlite";
+  }
+
+  return resolve(join(__dirname, "../data/vatsim.sqlite"));
+}
+
+const DB_PATH = resolveDbPath();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 const db = openDb(DB_PATH);
+console.log(`[init] sqlite db path: ${DB_PATH}`);
 
 function nowTs() {
   return Math.floor(Date.now() / 1000);

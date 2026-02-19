@@ -46,3 +46,15 @@ Copy `server/.env.example` to `server/.env` if you want to customize:
 - `POLL_INTERVAL_SECONDS` (default 15)
 - `RETENTION_HOURS` (default 24)
 - `DB_PATH` (default `./data/vatsim.sqlite`)
+
+## Railway persistence
+
+Railway containers are ephemeral across redeploys, so SQLite must be placed on a mounted volume.
+
+1. Attach a Railway Volume and mount it (commonly `/data`).
+2. Set `DB_PATH=/data/vatsim.sqlite` in service variables.
+
+If `DB_PATH` is not set, the server now auto-detects Railway volume mounts in this order:
+- `RAILWAY_VOLUME_MOUNT_PATH/vatsim.sqlite`
+- `/data/vatsim.sqlite` (if `/data` exists)
+- fallback to local `server/data/vatsim.sqlite`
