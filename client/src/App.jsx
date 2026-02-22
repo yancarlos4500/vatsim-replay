@@ -325,6 +325,7 @@ export default function App() {
   const [tracon, setTracon] = useState(null);
   const [showAltitude, setShowAltitude] = useState(true);
   const [showGroundspeed, setShowGroundspeed] = useState(true);
+  const [hideBelow30Knots, setHideBelow30Knots] = useState(false);
   const [showPilotAirspace, setShowPilotAirspace] = useState(true);
   const [showRouteAirports, setShowRouteAirports] = useState(true);
   const [selectedAirspaces, setSelectedAirspaces] = useState([]);
@@ -688,8 +689,12 @@ useEffect(() => {
 
   // Filter snapshot to only planes within map bounds
   const visibleSnapshot = useMemo(() => {
-    if (!mapBounds || !snapshot.length) return snapshot;
-    return snapshot.filter(p => {
+    if (!snapshot.length) return snapshot;
+    return snapshot.filter((p) => {
+      if (hideBelow30Knots && Number.isFinite(p.groundspeed) && p.groundspeed < 30) {
+        return false;
+      }
+      if (!mapBounds) return true;
       const { lat, lon } = p;
       return (
         lat >= mapBounds.south &&
@@ -698,7 +703,7 @@ useEffect(() => {
         lon <= mapBounds.east
       );
     });
-  }, [snapshot, mapBounds]);
+  }, [snapshot, mapBounds, hideBelow30Knots]);
 
   const visibleAirspace = useMemo(() => {
     if (!airspace?.features || !mapBounds) return airspace;
@@ -991,6 +996,7 @@ useEffect(() => {
             <FormControlLabel control={<Checkbox checked={showTracon} onChange={(e) => setShowTracon(e.target.checked)} />} label="Show TRACON" />
             <FormControlLabel control={<Checkbox checked={showAltitude} onChange={(e) => setShowAltitude(e.target.checked)} />} label="Show altitude" />
             <FormControlLabel control={<Checkbox checked={showGroundspeed} onChange={(e) => setShowGroundspeed(e.target.checked)} />} label="Show groundspeed" />
+            <FormControlLabel control={<Checkbox checked={hideBelow30Knots} onChange={(e) => setHideBelow30Knots(e.target.checked)} />} label="< 30 knots" />
             <FormControlLabel control={<Checkbox checked={showRouteAirports} onChange={(e) => setShowRouteAirports(e.target.checked)} />} label="Show dep-arr" />
             <FormControlLabel control={<Checkbox checked={showPilotAirspace} onChange={(e) => setShowPilotAirspace(e.target.checked)} />} label="Show pilot airspace" />
           </FormGroup>
