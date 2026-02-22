@@ -85,14 +85,31 @@ async function pollOnce() {
 
 let pollTimer = null;
 
-async function startCollector() {
-  // First poll immediately
+async function warmupGeoJsonCaches() {
+  // Pre-warm airspace cache in background
   try {
-    await pollOnce();
+    const controllerA = new AbortController();
+    const timerA = setTimeout(() => controllerA.abort(), 5000);
+    const rA = await fetch(AIRSPACE_URLS[0], {
+      headers: { "User-Agent": "vatsim-traffic-replay/1.0 (+https://example.local)" },
+      signal: controllerA.signal
+    });
+    clearTimeout(timerA);
+    if (rA.ok) {
+      const data = await rA.json();
+      airspaceCache = { ts: Date.now(), data };
+      console.log("[init] airspace cache warmed");
+    }
   } catch (e) {
-    console.error("[collector] initial poll failed:", e);
+    console.warn("[init] airspace cache warmup failed (non-critical):", e?.message || e);
   }
+}
 
+async function startCollector() {
+  // Warm up GeoJSON caches in background
+  warmupGeoJsonCaches();
+
+  // Start recurring polls
   pollTimer = setInterval(async () => {
     try {
       await pollOnce();
@@ -103,6 +120,13 @@ async function startCollector() {
       }
     }
   }, POLL_INTERVAL_SECONDS * 1000);
+
+  // First poll in background (non-blocking) to warm up cache
+  pollOnce().catch(e => {
+    if (e?.type !== 'aborted') {
+      console.error("[collector] initial poll failed:", e?.message || e);
+    }
+  });
 }
 
 app.get("/api/meta", (req, res) => {
@@ -213,16 +237,34 @@ app.get("/api/airspace", async (req, res) => {
 
     let lastStatus = null;
     let lastUrl = null;
+    const FETCH_TIMEOUT_MS = 10000; // 10 second timeout
+    
     for (const url of AIRSPACE_URLS) {
       lastUrl = url;
-      const r = await fetch(url, {
-        headers: { "User-Agent": "vatsim-traffic-replay/1.0 (+https://example.local)" }
-      });
-      lastStatus = r.status;
-      if (!r.ok) continue;
-      const data = await r.json();
-      airspaceCache = { ts: now, data };
-      return res.json(data);
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+        const r = await fetch(url, {
+          headers: { "User-Agent": "vatsim-traffic-replay/1.0 (+https://example.local)" },
+          signal: controller.signal
+        });
+        clearTimeout(timer);
+        
+        lastStatus = r.status;
+        if (!r.ok) continue;
+        const data = await r.json();
+        airspaceCache = { ts: now, data };
+        return res.json(data);
+      } catch (error) {
+        // Timeout or network error, try next URL
+        continue;
+      }
+    }
+
+    // Return cached data even if expired, better than 502
+    if (airspaceCache.data) {
+      res.set("Cache-Control", "public, max-age=60");
+      return res.json(airspaceCache.data);
     }
 
     return res.status(502).json({
@@ -233,7 +275,7 @@ app.get("/api/airspace", async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: "airspace exception", message: String(e?.message || e) });
   }
-});
+})
 
 app.get("/api/tracon", (req, res) => {
   try {
@@ -407,5 +449,5 @@ atcCache = { ts: 0, positions: [] };
 
 app.listen(PORT, () => {
   console.log(`Server listening on http://localhost:${PORT}`);
-  startCollector();
+  startCollector(); // Non-blocking; polls run in background
 });

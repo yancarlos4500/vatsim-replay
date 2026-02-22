@@ -120,18 +120,28 @@ export class AirspaceMatcher {
   async load() {
     let data = null;
     let lastStatus = null;
+    const FETCH_TIMEOUT_MS = 5000; // 5 second timeout for airspace fetch
 
     for (const url of AIRSPACE_URLS) {
-      const response = await fetch(url, {
-        headers: {
-          "User-Agent": USER_AGENT
-        }
-      });
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+        const response = await fetch(url, {
+          headers: {
+            "User-Agent": USER_AGENT
+          },
+          signal: controller.signal
+        });
+        clearTimeout(timer);
 
-      lastStatus = response.status;
-      if (!response.ok) continue;
-      data = await response.json();
-      break;
+        lastStatus = response.status;
+        if (!response.ok) continue;
+        data = await response.json();
+        break;
+      } catch (error) {
+        // Timeout or network error, try next URL
+        continue;
+      }
     }
 
     if (!data || !Array.isArray(data.features)) {

@@ -44,9 +44,28 @@ export async function getAirports(since, until) {
 }
 
 export async function getAirspace() {
+  // Check browser cache first
+  const cached = localStorage.getItem("airspace_cache");
+  if (cached) {
+    try {
+      return JSON.parse(cached);
+    } catch (e) {
+      // Invalid cache, continue to fetch
+    }
+  }
+
   const r = await fetch("/api/airspace");
   if (!r.ok) throw new Error("airspace failed");
-  return r.json();
+  const data = await r.json();
+  
+  // Cache for 24 hours
+  try {
+    localStorage.setItem("airspace_cache", JSON.stringify(data));
+  } catch (e) {
+    // Storage full or not available, continue without caching
+  }
+  
+  return data;
 }
 
 export async function getAtcOnline() {
@@ -62,7 +81,26 @@ export async function getAtcSnapshot(ts) {
 }
 
 export async function getTracon() {
+  // Check browser cache first
+  const cached = localStorage.getItem("tracon_cache");
+  if (cached) {
+    try {
+      return JSON.parse(cached);
+    } catch (e) {
+      // Invalid cache, continue to fetch
+    }
+  }
+
   const r = await fetch("/api/tracon");
   if (!r.ok) throw new Error("tracon failed");
-  return r.json();
+  const data = await r.json();
+  
+  // Cache for 24 hours
+  try {
+    localStorage.setItem("tracon_cache", JSON.stringify(data));
+  } catch (e) {
+    // Storage full or not available, continue without caching
+  }
+  
+  return data;
 }
