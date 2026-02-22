@@ -150,8 +150,10 @@ app.get("/api/callsigns", (req, res) => {
       ? req.query.airports
       : (typeof req.query.airport === "string" ? req.query.airport : "")
   );
-  const rows = getCallsingsInRange(db, since, until, limit, airspace || null, airports);
-  res.json({ since, until, airspace: airspace || null, airports, rows });
+  const minAltitude = req.query.minAltitude ? parseInt(req.query.minAltitude, 10) : null;
+  const maxAltitude = req.query.maxAltitude ? parseInt(req.query.maxAltitude, 10) : null;
+  const rows = getCallsingsInRange(db, since, until, limit, airspace || null, airports, minAltitude, maxAltitude);
+  res.json({ since, until, airspace: airspace || null, airports, minAltitude, maxAltitude, rows });
 });
 
 app.get("/api/track/:callsign", (req, res) => {
@@ -166,8 +168,10 @@ app.get("/api/track/:callsign", (req, res) => {
       ? req.query.airports
       : (typeof req.query.airport === "string" ? req.query.airport : "")
   );
-  const rows = getTrack(db, callsign, since, until, step, airspace || null, airports);
-  res.json({ callsign, since, until, step, airspace: airspace || null, airports, rows });
+  const minAltitude = req.query.minAltitude ? parseInt(req.query.minAltitude, 10) : null;
+  const maxAltitude = req.query.maxAltitude ? parseInt(req.query.maxAltitude, 10) : null;
+  const rows = getTrack(db, callsign, since, until, step, airspace || null, airports, minAltitude, maxAltitude);
+  res.json({ callsign, since, until, step, airspace: airspace || null, airports, minAltitude, maxAltitude, rows });
 });
 
 app.get("/api/snapshot", (req, res) => {
@@ -180,8 +184,10 @@ app.get("/api/snapshot", (req, res) => {
       ? req.query.airports
       : (typeof req.query.airport === "string" ? req.query.airport : "")
   );
-  const rows = getSnapshotAt(db, ts, window, airspace || null, airports);
-  res.json({ ts, window, airspace: airspace || null, airports, rows });
+  const minAltitude = req.query.minAltitude ? parseInt(req.query.minAltitude, 10) : null;
+  const maxAltitude = req.query.maxAltitude ? parseInt(req.query.maxAltitude, 10) : null;
+  const rows = getSnapshotAt(db, ts, window, airspace || null, airports, minAltitude, maxAltitude);
+  res.json({ ts, window, airspace: airspace || null, airports, minAltitude, maxAltitude, rows });
 });
 
 app.get("/api/airspaces", (req, res) => {

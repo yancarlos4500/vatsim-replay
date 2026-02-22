@@ -331,6 +331,8 @@ export default function App() {
   const [airspaceOptions, setAirspaceOptions] = useState([]);
   const [airportFilterText, setAirportFilterText] = useState("");
   const [airportOptions, setAirportOptions] = useState([]);
+  const [minAltitude, setMinAltitude] = useState("");
+  const [maxAltitude, setMaxAltitude] = useState("");
   const [rangeStart, setRangeStart] = useState(null);
   const [rangeEnd, setRangeEnd] = useState(null);
   const [mapBounds, setMapBounds] = useState(null);
@@ -524,6 +526,10 @@ useEffect(() => {
       const atcSnapshots = new Map();
       const timestamps = [];
       
+      // Parse altitude filters
+      const minAlt = minAltitude && minAltitude.trim() ? parseInt(minAltitude, 10) : null;
+      const maxAlt = maxAltitude && maxAltitude.trim() ? parseInt(maxAltitude, 10) : null;
+      
       // Generate all timestamps in the range at the poll interval
       for (let ts = rangeStart; ts <= rangeEnd; ts += stepSeconds) {
         timestamps.push(ts);
@@ -540,7 +546,7 @@ useEffect(() => {
         // Fetch both pilot and ATC snapshots in parallel for each timestamp
         const promises = batch.map(ts =>
           Promise.all([
-            getSnapshot(ts, selectedAirspace, airportFilterText)
+            getSnapshot(ts, selectedAirspace, airportFilterText, minAlt, maxAlt)
               .then(data => ({ ts, data: data.rows || [] }))
               .catch(e => {
                 console.error(`Failed to load snapshot for ${ts}:`, e);
@@ -612,7 +618,7 @@ useEffect(() => {
   useEffect(() => {
     setPreloadedSnapshots(new Map());
     setPreloadedAtcSnapshots(new Map());
-  }, [selectedAirspace, airportFilterText]);
+  }, [selectedAirspace, airportFilterText, minAltitude, maxAltitude]);
 
 // Playback: advance by one stored step each "update", at updatesPerSecond rate
 useInterval(() => {
@@ -945,6 +951,27 @@ useEffect(() => {
               <option key={name} value={name} />
             ))}
           </datalist>
+
+          <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
+            <TextField
+              label="Min altitude"
+              type="number"
+              size="small"
+              value={minAltitude}
+              onChange={(e) => setMinAltitude(e.target.value)}
+              placeholder="0"
+              inputProps={{ min: "0", step: "100" }}
+            />
+            <TextField
+              label="Max altitude"
+              type="number"
+              size="small"
+              value={maxAltitude}
+              onChange={(e) => setMaxAltitude(e.target.value)}
+              placeholder="50000"
+              inputProps={{ min: "0", step: "100" }}
+            />
+          </Stack>
         </Paper>
 
         <Paper variant="outlined" sx={{ p: 1.25, bgcolor: "rgba(255,255,255,0.03)" }}>
@@ -966,6 +993,7 @@ useEffect(() => {
               <Chip size="small" label={`Showing: ${snapshot.length.toLocaleString()} aircraft`} />
               <Chip size="small" label={`Airspace: ${selectedAirspace || "All"}`} />
               <Chip size="small" label={`Airport: ${airportFilterText || "All"}`} />
+              <Chip size="small" label={`Altitude: ${minAltitude || "0"} - ${maxAltitude || "∞"} ft`} />
             </Stack>
           ) : (
             <Stack spacing={1}>

@@ -4,28 +4,34 @@ export async function getMeta() {
   return r.json();
 }
 
-export async function getSnapshot(ts, airspace = "", airports = "") {
+export async function getSnapshot(ts, airspace = "", airports = "", minAltitude = null, maxAltitude = null) {
   const params = new URLSearchParams({ ts: String(ts) });
   if (airspace) params.set("airspace", airspace);
   if (airports) params.set("airports", airports);
+  if (minAltitude !== null && minAltitude >= 0) params.set("minAltitude", String(minAltitude));
+  if (maxAltitude !== null && maxAltitude >= 0) params.set("maxAltitude", String(maxAltitude));
   const r = await fetch(`/api/snapshot?${params.toString()}`);
   if (!r.ok) throw new Error("snapshot failed");
   return r.json();
 }
 
-export async function getCallsigns(since, until, airspace = "", airports = "") {
+export async function getCallsigns(since, until, airspace = "", airports = "", minAltitude = null, maxAltitude = null) {
   const params = new URLSearchParams({ since: String(since), until: String(until), limit: "2000" });
   if (airspace) params.set("airspace", airspace);
   if (airports) params.set("airports", airports);
+  if (minAltitude !== null && minAltitude >= 0) params.set("minAltitude", String(minAltitude));
+  if (maxAltitude !== null && maxAltitude >= 0) params.set("maxAltitude", String(maxAltitude));
   const r = await fetch(`/api/callsigns?${params.toString()}`);
   if (!r.ok) throw new Error("callsigns failed");
   return r.json();
 }
 
-export async function getTrack(callsign, since, until, step = 15, airspace = "", airports = "") {
+export async function getTrack(callsign, since, until, step = 15, airspace = "", airports = "", minAltitude = null, maxAltitude = null) {
   const params = new URLSearchParams({ since: String(since), until: String(until), step: String(step) });
   if (airspace) params.set("airspace", airspace);
   if (airports) params.set("airports", airports);
+  if (minAltitude !== null && minAltitude >= 0) params.set("minAltitude", String(minAltitude));
+  if (maxAltitude !== null && maxAltitude >= 0) params.set("maxAltitude", String(maxAltitude));
   const r = await fetch(`/api/track/${encodeURIComponent(callsign)}?${params.toString()}`);
   if (!r.ok) throw new Error("track failed");
   return r.json();

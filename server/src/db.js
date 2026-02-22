@@ -42,6 +42,29 @@ function buildAirportFilterClause(airports, departureColumn = "departure", desti
   };
 }
 
+function buildAltitudeFilterClause(minAltitude, maxAltitude) {
+  if (!Number.isFinite(minAltitude) && !Number.isFinite(maxAltitude)) {
+    return { clause: "", params: [] };
+  }
+
+  let clause = " AND (";
+  const params = [];
+  const conditions = [];
+
+  if (Number.isFinite(minAltitude) && minAltitude >= 0) {
+    conditions.push("altitude >= ?");
+    params.push(minAltitude);
+  }
+
+  if (Number.isFinite(maxAltitude) && maxAltitude >= 0) {
+    conditions.push("altitude <= ?");
+    params.push(maxAltitude);
+  }
+
+  clause += conditions.join(" AND ") + ")";
+  return { clause: conditions.length > 0 ? clause : "", params };
+}
+
 export function openDb(dbPath) {
   mkdirSync(dirname(dbPath), { recursive: true });
   const db = new Database(dbPath);
@@ -112,7 +135,7 @@ export function pruneOld(db, cutoffTs) {
   return info.changes ?? 0;
 }
 
-export function getCallsingsInRange(db, sinceTs, untilTs, limit = 2000, airspace = null, airports = []) {
+export function getCallsingsInRange(db, sinceTs, untilTs, limit = 2000, airspace = null, airports = [], minAltitude = null, maxAltitude = null) {
   let sql = `
       SELECT callsign, MIN(ts) AS firstSeen, MAX(ts) AS lastSeen, COUNT(*) AS points
       FROM snapshots
@@ -129,6 +152,10 @@ export function getCallsingsInRange(db, sinceTs, untilTs, limit = 2000, airspace
   sql += airportFilter.clause;
   params.push(...airportFilter.params);
 
+  const altitudeFilter = buildAltitudeFilterClause(minAltitude, maxAltitude);
+  sql += altitudeFilter.clause;
+  params.push(...altitudeFilter.params);
+
   sql += `
       GROUP BY callsign
       ORDER BY lastSeen DESC
@@ -139,7 +166,7 @@ export function getCallsingsInRange(db, sinceTs, untilTs, limit = 2000, airspace
   return db.prepare(sql).all(...params);
 }
 
-export function getTrack(db, callsign, sinceTs, untilTs, stepSeconds = 0, airspace = null, airports = []) {
+export function getTrack(db, callsign, sinceTs, untilTs, stepSeconds = 0, airspace = null, airports = [], minAltitude = null, maxAltitude = null) {
   // optional downsample: return at most one point per stepSeconds bucket
   if (stepSeconds && stepSeconds > 0) {
     let sql = `
@@ -169,6 +196,10 @@ export function getTrack(db, callsign, sinceTs, untilTs, stepSeconds = 0, airspa
     sql += airportFilter.clause;
     params.push(...airportFilter.params);
 
+    const altitudeFilter = buildAltitudeFilterClause(minAltitude, maxAltitude);
+    sql += altitudeFilter.clause;
+    params.push(...altitudeFilter.params);
+
     sql += `
       GROUP BY bucket
       ORDER BY ts ASC
@@ -193,11 +224,15 @@ export function getTrack(db, callsign, sinceTs, untilTs, stepSeconds = 0, airspa
   sql += airportFilter.clause;
   params.push(...airportFilter.params);
 
+  const altitudeFilter = buildAltitudeFilterClause(minAltitude, maxAltitude);
+  sql += altitudeFilter.clause;
+  params.push(...altitudeFilter.params);
+
   sql += ` ORDER BY ts ASC`;
   return db.prepare(sql).all(...params);
 }
 
-export function getSnapshotAt(db, ts, windowSeconds = 10, airspace = null, airports = []) {
+export function getSnapshotAt(db, ts, windowSeconds = 10, airspace = null, airports = [], minAltitude = null, maxAltitude = null) {
   // nearest window around ts
   const from = ts - windowSeconds;
   const to = ts + windowSeconds;
@@ -217,6 +252,10 @@ export function getSnapshotAt(db, ts, windowSeconds = 10, airspace = null, airpo
   const airportFilter = buildAirportFilterClause(airports);
   sql += airportFilter.clause;
   params.push(...airportFilter.params);
+
+  const altitudeFilter = buildAltitudeFilterClause(minAltitude, maxAltitude);
+  sql += altitudeFilter.clause;
+  params.push(...altitudeFilter.params);
 
   return db.prepare(sql).all(...params);
 }
