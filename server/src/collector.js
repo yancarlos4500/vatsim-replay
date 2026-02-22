@@ -24,7 +24,9 @@ export async function fetchPilots() {
       longitude: p.longitude,
       altitude: p.altitude,
       groundspeed: p.groundspeed,
-      heading: p.heading
+      heading: p.heading,
+      departure: p.flight_plan?.departure,
+      destination: p.flight_plan?.arrival
     }));
 }
 

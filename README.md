@@ -9,11 +9,23 @@ A simple website that **records all VATSIM pilot positions** (callsign + positio
 ## What it does
 - Backend polls VATSIM every `POLL_INTERVAL_SECONDS` (default 15s)
 - Stores each pilot snapshot into SQLite
+- Stores pilot telemetry (`altitude`, `groundspeed`, `heading`) for replay labels
+- Resolves and stores the pilot's current airspace (from VATSpy boundaries)
+- Stores pilot route airports (`departure`, `destination`) from VATSIM flight plan data
 - Automatically prunes data older than 24 hours
 - Frontend map + timeline slider + play/pause
 - Two modes:
   - **All traffic** replay: shows all pilots at the selected time (fetches snapshot per step)
   - **Track a callsign**: shows a single aircraft path and animates it
+
+## Replay controls
+- Toggle pilot label details on replay:
+  - altitude
+  - groundspeed
+  - pilot airspace
+- Filter replay to a selected airspace (`All airspaces` or one specific airspace)
+- Filter replay by one or more airports typed as comma-separated ICAOs (matches either departure or destination)
+- Aircraft marker details include route as `DEP-ARR`
 
 ## Quick start (dev)
 

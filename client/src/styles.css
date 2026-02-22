@@ -1,17 +1,68 @@
 :root { color-scheme: dark; }
 body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background: #0b0f14; color: #e6edf3; }
 a { color: inherit; }
-.panel { position: relative; width: 340px; height: 100vh; flex-shrink: 0; background: rgba(12, 18, 26, 0.88); border-right: 1px solid rgba(255,255,255,0.08); padding: 4px 8px 4px 4px; backdrop-filter: blur(10px); display: flex; flex-direction: column; gap: 2px; justify-content: space-between; }
-.row { display: flex; flex-direction: column; gap: 4px; align-items: stretch; padding: 0 12px; }
+.panel { position: relative; width: 360px; height: 100vh; overflow-y: auto; flex-shrink: 0; background: linear-gradient(180deg, rgba(12, 18, 26, 0.94), rgba(9, 14, 20, 0.94)); border-right: 1px solid rgba(255,255,255,0.08); padding: 12px; backdrop-filter: blur(10px); display: flex; flex-direction: column; gap: 10px; }
+.row { display: flex; flex-direction: column; gap: 4px; align-items: stretch; padding: 0; }
 .row > * { flex: 0 0 auto; }
-.label { font-size: 13px; opacity: 0.8; }
-select, input, button { background: #121a24; color: #e6edf3; border: 1px solid rgba(255,255,255,0.10); border-radius: 8px; padding: 4px 6px; font-size: 14px; }
+.label { font-size: 12px; opacity: 0.8; text-transform: uppercase; letter-spacing: 0.04em; }
+select, input, button { background: #121a24; color: #e6edf3; border: 1px solid rgba(255,255,255,0.10); border-radius: 10px; padding: 7px 9px; font-size: 14px; }
 button { cursor: pointer; }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 small { opacity: 0.75; }
 .slider { width: 100%; max-width: 100%; }
 .mapWrap { height: 100vh; width: 100vw; display: flex; flex-direction: row; }
-.badge { display: inline-flex; gap: 3px; align-items: center; padding: 2px 4px; border-radius: 999px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08); font-size: 13px; }
+.badge { display: inline-flex; gap: 3px; align-items: center; padding: 3px 7px; border-radius: 999px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08); font-size: 13px; }
+
+.panelHeader {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+}
+
+.panelTitle {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.panelStatusGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+}
+
+.panelSection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.07);
+}
+
+.sectionTitle {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.85;
+}
+
+.rowInline {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.panelToggle {
+  cursor: pointer;
+  justify-content: flex-start;
+}
 
 .planeDivIcon { background: transparent; border: none; }
 .planeMarker {
@@ -40,6 +91,24 @@ small { opacity: 0.75; }
   background: rgba(12, 18, 26, 0.75);
   border: 1px solid rgba(255,255,255,0.10);
   white-space: nowrap;
+}
+
+.planeDetails {
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.2;
+  padding: 4px 6px;
+  border-radius: 8px;
+  background: rgba(12, 18, 26, 0.7);
+  border: 1px solid rgba(255,255,255,0.08);
+  white-space: nowrap;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.planeDetailRow {
+  text-align: left;
 }
 
 .atcDivIcon { background: transparent; border: none; }

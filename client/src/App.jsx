@@ -1,8 +1,98 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MapContainer, TileLayer, Marker, Polyline, GeoJSON } from "react-leaflet";
 import L from "leaflet";
-import { getMeta, getSnapshot, getCallsigns, getTrack, getAirspace, getAtcSnapshot, getTracon } from "./api";
+import {
+  Box,
+  Paper,
+  Stack,
+  Typography,
+  Chip,
+  Button,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  TextField,
+  FormGroup,
+  FormControlLabel,
+  Checkbox,
+  Slider
+} from "@mui/material";
+import { createTheme, ThemeProvider } from "@mui/material/styles";
+import { getMeta, getSnapshot, getCallsigns, getTrack, getAirspace, getAtcSnapshot, getTracon, getAirspaces, getAirports } from "./api";
 import { fmt, clamp } from "./time";
+
+const panelTheme = createTheme({
+  palette: {
+    mode: "dark",
+    primary: { main: "#66b2ff" },
+    background: {
+      default: "#0f1722",
+      paper: "#162334"
+    },
+    text: {
+      primary: "#f3f8ff",
+      secondary: "#c5d6e8"
+    }
+  },
+  components: {
+    MuiPaper: {
+      styleOverrides: {
+        root: {
+          borderColor: "rgba(180, 205, 230, 0.35)",
+          backgroundImage: "none"
+        }
+      }
+    },
+    MuiChip: {
+      styleOverrides: {
+        root: {
+          backgroundColor: "rgba(112, 161, 212, 0.18)",
+          border: "1px solid rgba(170, 205, 240, 0.35)",
+          color: "#e9f2fb"
+        }
+      }
+    },
+    MuiOutlinedInput: {
+      styleOverrides: {
+        root: {
+          backgroundColor: "rgba(11, 20, 30, 0.9)",
+          "& .MuiOutlinedInput-notchedOutline": {
+            borderColor: "rgba(170, 205, 240, 0.38)"
+          },
+          "&:hover .MuiOutlinedInput-notchedOutline": {
+            borderColor: "rgba(170, 205, 240, 0.7)"
+          }
+        },
+        input: {
+          color: "#f3f8ff"
+        }
+      }
+    },
+    MuiFormLabel: {
+      styleOverrides: {
+        root: {
+          color: "#c5d6e8"
+        }
+      }
+    },
+    MuiTypography: {
+      styleOverrides: {
+        root: {
+          color: "#f3f8ff"
+        }
+      }
+    },
+    MuiButton: {
+      styleOverrides: {
+        root: {
+          textTransform: "none",
+          fontWeight: 600
+        }
+      }
+    }
+  }
+});
 
 // Fix Leaflet default marker icon paths in Vite
 import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
@@ -15,8 +105,11 @@ L.Icon.Default.mergeOptions({
   shadowUrl: markerShadow
 });
 
-function planeDivIcon(callsign, heading) {
+function planeDivIcon(callsign, heading, detailRows = []) {
   const rot = Number.isFinite(heading) ? heading : 0;
+  const detailsHtml = detailRows.length > 0
+    ? `<div class="planeDetails">${detailRows.map((row) => `<div class="planeDetailRow">${row}</div>`).join("")}</div>`
+    : "";
   const html = `
     <div class="planeMarker">
       <div class="planeIcon" style="transform: rotate(${rot}deg)">
@@ -25,12 +118,13 @@ function planeDivIcon(callsign, heading) {
         </svg>
       </div>
       <div class="planeLabel">${callsign}</div>
+      ${detailsHtml}
     </div>
   `;
   return L.divIcon({
     className: "planeDivIcon",
     html,
-    iconSize: [1, 1], // size handled by HTML/CSS
+    iconSize: [1, 1],
     iconAnchor: [0, 0]
   });
 }
@@ -66,34 +160,34 @@ function useInterval(cb, delay, enabled) {
 
 // Mapping of VATSIM sector codes to GeoJSON boundary IDs
 const sectorToGeojsonMap = {
-  "BOS": "KZBW",  // Boston Center
-  "TOR": "CZYZ",  // Toronto Center
-  "NYC": "KZNY",  // New York Center
-  "DC": "KZDC",  // Washington Center
-  "ATL": "KZTL",  // Atlanta Center
-  "MIA": "KZMA",  // Miami Center
-  "JAX": "KZJX",  // Jacksonville Center
-  "CLE": "KZOB",  // Cleveland Center
-  "MEM": "KZME",  // Memphis Center
-  "CHI": "KZAU",  // Chicago Center
-  "DEN": "KZDV",  // Denver Center
-  "FTW": "KZFW",  // Fort Worth (same as Dallas)
-  "HOU": "KZHU",  // Houston Center
-  "ORD": "KZAU",  // Chicago (same as CHI)
-  "IND": "KZID",  // Indianapolis Center
-  "MSP": "KZMP",  // Minneapolis Center
-  "SLC": "KZLC",  // Salt Lake City Center
-  "LAX": "KZLA",  // Los Angeles Center
-  "OAK": "KZOA",  // Oakland Center
-  "SEA": "KZSE",  // Seattle Center
-  "PHO": "KZAB",  // Phoenix/Albuquerque Center
-  "ABQ": "KZAB",  // Albuquerque Center
-  "ZAK": "KZAK",  // Oakland Oceanic (ZAK sector)
-  "HNL": "KZPP",  // Honolulu Center
-  "ZBW": "KZBW",  // Boston Center (using Z-code directly)
-  "ZNY": "KZNY",  // New York Center (using Z-code directly)
-  "ZDC": "KZDC",  // Washington Center (using Z-code directly)
-  "SJU": "TJZS",  // San Juan Center
+  "BOS": "KZBW",
+  "TOR": "CZYZ",
+  "NYC": "KZNY",
+  "DC": "KZDC",
+  "ATL": "KZTL",
+  "MIA": "KZMA",
+  "JAX": "KZJX",
+  "CLE": "KZOB",
+  "MEM": "KZME",
+  "CHI": "KZAU",
+  "DEN": "KZDV",
+  "FTW": "KZFW",
+  "HOU": "KZHU",
+  "ORD": "KZAU",
+  "IND": "KZID",
+  "MSP": "KZMP",
+  "SLC": "KZLC",
+  "LAX": "KZLA",
+  "OAK": "KZOA",
+  "SEA": "KZSE",
+  "PHO": "KZAB",
+  "ABQ": "KZAB",
+  "ZAK": "KZAK",
+  "HNL": "KZPP",
+  "ZBW": "KZBW",
+  "ZNY": "KZNY",
+  "ZDC": "KZDC",
+  "SJU": "TJZS"
 };
 
 function mapVatsimToGeojson(vatsimCode) {
@@ -228,6 +322,14 @@ export default function App() {
   const [airspace, setAirspace] = useState(null);
   const [showTracon, setShowTracon] = useState(true);
   const [tracon, setTracon] = useState(null);
+  const [showAltitude, setShowAltitude] = useState(true);
+  const [showGroundspeed, setShowGroundspeed] = useState(true);
+  const [showPilotAirspace, setShowPilotAirspace] = useState(true);
+  const [showRouteAirports, setShowRouteAirports] = useState(true);
+  const [selectedAirspace, setSelectedAirspace] = useState("");
+  const [airspaceOptions, setAirspaceOptions] = useState([]);
+  const [airportFilterText, setAirportFilterText] = useState("");
+  const [airportOptions, setAirportOptions] = useState([]);
   const [rangeStart, setRangeStart] = useState(null);
   const [rangeEnd, setRangeEnd] = useState(null);
   const [mapBounds, setMapBounds] = useState(null);
@@ -353,7 +455,7 @@ useEffect(() => {
   async function refreshSnapshot(ts) {
     setLoading(true);
     try {
-      const s = await getSnapshot(ts);
+      const s = await getSnapshot(ts, selectedAirspace, airportFilterText);
       setSnapshot(s.rows || []);
     } finally {
       setLoading(false);
@@ -374,8 +476,34 @@ useEffect(() => {
     if (!bounds) return;
     const until = rangeEnd ?? bounds.max;
     const since = rangeStart ?? bounds.min; // last 6h
-    const r = await getCallsigns(since, until);
+    const r = await getCallsigns(since, until, selectedAirspace, airportFilterText);
     setCallsigns((r.rows || []).map(x => x.callsign).sort());
+  }
+
+  async function refreshAirspaceOptions() {
+    if (!bounds) return;
+    const until = rangeEnd ?? bounds.max;
+    const since = rangeStart ?? bounds.min;
+    const r = await getAirspaces(since, until);
+    const unique = Array.from(new Set(
+      (r.rows || [])
+        .map((x) => (typeof x.airspace === "string" ? x.airspace.trim().toUpperCase() : ""))
+        .filter(Boolean)
+    ));
+    setAirspaceOptions(unique);
+  }
+
+  async function refreshAirportOptions() {
+    if (!bounds) return;
+    const until = rangeEnd ?? bounds.max;
+    const since = rangeStart ?? bounds.min;
+    const r = await getAirports(since, until);
+    const unique = Array.from(new Set(
+      (r.rows || [])
+        .map((x) => (typeof x.airport === "string" ? x.airport.trim().toUpperCase() : ""))
+        .filter(Boolean)
+    ));
+    setAirportOptions(unique);
   }
 
   async function loadTrack(cs) {
@@ -384,7 +512,7 @@ useEffect(() => {
     try {
       const until = rangeEnd ?? bounds.max;
     const since = rangeStart ?? bounds.min; // last 6h by default
-      const r = await getTrack(cs, since, until, 15);
+      const r = await getTrack(cs, since, until, 15, selectedAirspace, airportFilterText);
       setTrackState((r.rows || []).map(p => [p.lat, p.lon]));
     } finally {
       setLoading(false);
@@ -398,7 +526,18 @@ useEffect(() => {
       refreshSnapshot(t).catch(console.error);
     }
     refreshAtcSnapshot(t).catch(console.error);
-  }, [t, mode]);
+  }, [t, mode, selectedAirspace, airportFilterText]);
+
+  useEffect(() => {
+    refreshAirspaceOptions().catch(console.error);
+    refreshAirportOptions().catch(console.error);
+  }, [bounds, rangeStart, rangeEnd]);
+
+  useEffect(() => {
+    if (selectedAirspace && !airspaceOptions.includes(selectedAirspace)) {
+      setSelectedAirspace("");
+    }
+  }, [selectedAirspace, airspaceOptions]);
 
 // Playback: advance by one stored step each "update", at updatesPerSecond rate
 useInterval(() => {
@@ -423,13 +562,14 @@ useEffect(() => {
     return [18.4, -66.0];
   }, [snapshot]);
 
-  const getPlaneIcon = useCallback((callsign, heading) => {
+  const getPlaneIcon = useCallback((callsign, heading, detailRows) => {
     const rounded = Number.isFinite(heading) ? Math.round(heading / 5) * 5 : 0;
-    const key = `${callsign}:${rounded}`;
+    const detailsKey = Array.isArray(detailRows) ? detailRows.join("|") : "";
+    const key = `${callsign}:${rounded}:${detailsKey}`;
     const cache = planeIconCache.current;
     let icon = cache.get(key);
     if (!icon) {
-      icon = planeDivIcon(callsign, rounded);
+      icon = planeDivIcon(callsign, rounded, detailRows);
       cache.set(key, icon);
       if (cache.size > 2000) cache.clear();
     }
@@ -560,121 +700,168 @@ useEffect(() => {
   }, [atcOnlineTracon]);
 
   const snapshotMarkers = useMemo(() => {
+    const formatDetailRows = (p) => {
+      const rows = [];
+      if (showRouteAirports) rows.push(`${p.departure || "—"}-${p.destination || "—"}`);
+      if (showAltitude) rows.push(Number.isFinite(p.altitude) ? `${Math.round(p.altitude)} ft` : "—");
+      if (showGroundspeed) rows.push(Number.isFinite(p.groundspeed) ? `${Math.round(p.groundspeed)} kt` : "—");
+      if (showPilotAirspace) rows.push(p.airspace || "—");
+      return rows;
+    };
+
     return visibleSnapshot.map((p) => (
       <Marker
         key={`${p.callsign}-${p.ts}-${p.lat}-${p.lon}`}
         position={[p.lat, p.lon]}
-        icon={getPlaneIcon(p.callsign, p.heading)}
+        icon={getPlaneIcon(p.callsign, p.heading, formatDetailRows(p))}
       />
     ));
-  }, [visibleSnapshot, getPlaneIcon]);
+  }, [visibleSnapshot, getPlaneIcon, showRouteAirports, showAltitude, showGroundspeed, showPilotAirspace]);
 
   return (
     <div className="mapWrap">
-      <div className="panel">
-        <div className="row" style={{ justifyContent: "space-between" }}>
-          <div className="row">
-            <span className="badge">VATSIM Traffic Replay</span>
-            <span className="badge"><span className="label">Stored:</span>&nbsp;{meta?.rows?.toLocaleString?.() ?? "—"} pts</span>
-            <span className="badge"><span className="label">Range:</span>&nbsp;{meta?.minTs ? fmt(meta.minTs) : "—"} → {meta?.maxTs ? fmt(meta.maxTs) : "—"}</span>
-            <span className="badge"><span className="label">Airspace:</span>&nbsp;{airspace?.features?.length ?? 0} features</span>
-            <span className="badge"><span className="label">TRACON:</span>&nbsp;{tracon?.features?.length ?? 0} sectors</span>
-          </div>
-          <div className="row">
-            <label className="label">Mode</label>
-            <select value={mode} onChange={(e) => { setMode(e.target.value); setPlaying(false); }}>
-              <option value="all">All traffic</option>
-              <option value="track">Track callsign</option>
-            </select>
-            <label className="badge" style={{ cursor: "pointer" }}>
-              <input type="checkbox" checked={showAirspace} onChange={(e) => setShowAirspace(e.target.checked)} />
-              <span>Show airspace</span>
-            </label>
-            <label className="badge" style={{ cursor: "pointer" }}>
-              <input type="checkbox" checked={showTracon} onChange={(e) => setShowTracon(e.target.checked)} />
-              <span>Show TRACON</span>
-            </label>
-          </div>
-        </div>
+      <ThemeProvider theme={panelTheme}>
+      <Box className="panel" sx={{ gap: 1.25 }}>
+        <Paper variant="outlined" sx={{ p: 1.25, bgcolor: "rgba(255,255,255,0.03)" }}>
+          <Typography variant="h6" sx={{ fontWeight: 700, mb: 1 }}>VATSIM Traffic Replay</Typography>
+          <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1 }}>
+            <Chip size="small" label={`Stored: ${meta?.rows?.toLocaleString?.() ?? "—"} pts`} />
+            <Chip size="small" label={`Airspace: ${airspace?.features?.length ?? 0}`} />
+            <Chip size="small" label={`TRACON: ${tracon?.features?.length ?? 0}`} />
+          </Stack>
+          <Chip size="small" label={`Range: ${meta?.minTs ? fmt(meta.minTs) : "—"} → ${meta?.maxTs ? fmt(meta.maxTs) : "—"}`} />
+        </Paper>
 
-        <div className="row" style={{ marginTop: 10 }}>
-          <button onClick={() => setPlaying(p => !p)} disabled={!bounds}>
-            {playing ? "Pause" : "Play"}
-          </button>
-          <button onClick={() => bounds && setT(bounds.min)} disabled={!bounds}>⏮ Start</button>
-          <button onClick={() => bounds && setT(bounds.max)} disabled={!bounds}>⏭ Live</button>
+        <Paper variant="outlined" sx={{ p: 1.25, bgcolor: "rgba(255,255,255,0.03)" }}>
+          <Typography variant="overline" sx={{ opacity: 1, color: "text.secondary" }}>Playback</Typography>
+          <Stack direction="row" spacing={1} sx={{ mb: 1 }}>
+            <Button variant="contained" size="small" onClick={() => setPlaying((p) => !p)} disabled={!bounds}>{playing ? "Pause" : "Play"}</Button>
+            <Button variant="outlined" size="small" onClick={() => bounds && setT(bounds.min)} disabled={!bounds}>Start</Button>
+            <Button variant="outlined" size="small" onClick={() => bounds && setT(bounds.max)} disabled={!bounds}>Live</Button>
+          </Stack>
 
-             <label className="label">Updates/sec</label>
-    <select value={updatesPerSecond} onChange={(e) => setUpdatesPerSecond(parseFloat(e.target.value))}>
-      <option value={0.5}>0.5</option>
-      <option value={1}>1</option>
-      <option value={2}>2</option>
-      <option value={4}>4</option>
-      <option value={8}>8</option>
-    </select>
+          <FormControl fullWidth size="small" sx={{ mb: 1 }}>
+            <InputLabel>Updates/sec</InputLabel>
+            <Select label="Updates/sec" value={String(updatesPerSecond)} onChange={(e) => setUpdatesPerSecond(parseFloat(e.target.value))}>
+              <MenuItem value="0.5">0.5</MenuItem>
+              <MenuItem value="1">1</MenuItem>
+              <MenuItem value="2">2</MenuItem>
+              <MenuItem value="4">4</MenuItem>
+              <MenuItem value="8">8</MenuItem>
+            </Select>
+          </FormControl>
 
-          <div style={{ flex: "1 1 auto" }} />
-          <span className="badge">{t ? fmt(t) : "—"}</span>
-          <span className="badge">{loading ? "Loading…" : "Ready"}</span>
-        </div>
+          <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1 }}>
+            <Chip size="small" label={t ? fmt(t) : "—"} />
+            <Chip size="small" label={loading ? "Loading…" : "Ready"} />
+          </Stack>
 
-        <div className="row" style={{ marginTop: 10 }}>
-          <input
-            className="slider"
-            type="range"
+          <Typography variant="caption" sx={{ opacity: 1, color: "text.secondary" }}>Timeline</Typography>
+          <Slider
+            value={t ?? 0}
             min={rangeStart ?? (bounds?.min ?? 0)}
             max={rangeEnd ?? (bounds?.max ?? 0)}
-            value={t ?? 0}
-            onChange={(e) => setT(parseInt(e.target.value, 10))}
+            onChange={(_, value) => setT(Array.isArray(value) ? value[0] : value)}
             disabled={!bounds}
           />
-          <small>Drag the timeline to replay within the selected range. Each update advances one stored step (~{stepSeconds}s). Updates/sec controls how many steps per second.</small>
-        </div>
+          <Typography variant="caption" sx={{ display: "block", mb: 1, opacity: 1, color: "text.secondary" }}>Each update advances one stored step (~{stepSeconds}s).</Typography>
 
-<div className="row" style={{ marginTop: 10 }}>
-  <span className="badge"><span className="label">Replay range</span>&nbsp;{rangeStart ? fmt(rangeStart) : "—"} → {rangeEnd ? fmt(rangeEnd) : "—"}</span>
-</div>
+          <Chip size="small" sx={{ mb: 1 }} label={`Replay range: ${rangeStart ? fmt(rangeStart) : "—"} → ${rangeEnd ? fmt(rangeEnd) : "—"}`} />
 
-<div className="row" style={{ marginTop: 10 }}>
-  <label className="label">Start</label>
-  <input
-    className="slider"
-    type="range"
-    min={bounds?.min ?? 0}
-    max={bounds?.max ?? 0}
-    value={rangeStart ?? (bounds?.min ?? 0)}
-    onChange={(e) => setRangeStart(parseInt(e.target.value, 10))}
-    disabled={!bounds}
-  />
-  <label className="label">End</label>
-  <input
-    className="slider"
-    type="range"
-    min={bounds?.min ?? 0}
-    max={bounds?.max ?? 0}
-    value={rangeEnd ?? (bounds?.max ?? 0)}
-    onChange={(e) => setRangeEnd(parseInt(e.target.value, 10))}
-    disabled={!bounds}
-  />
-  <button onClick={() => bounds && (setRangeStart(bounds.min), setRangeEnd(bounds.max), setT(bounds.max))} disabled={!bounds}>Full</button>
-</div>
+          <Typography variant="caption" sx={{ opacity: 1, color: "text.secondary" }}>Start</Typography>
+          <Slider
+            value={rangeStart ?? (bounds?.min ?? 0)}
+            min={bounds?.min ?? 0}
+            max={bounds?.max ?? 0}
+            onChange={(_, value) => setRangeStart(Array.isArray(value) ? value[0] : value)}
+            disabled={!bounds}
+          />
 
-        {mode === "all" ? (
-          <div className="row" style={{ marginTop: 10 }}>
-            <span className="badge">Showing: {snapshot.length.toLocaleString()} aircraft (near selected time)</span>
-          </div>
-        ) : (
-          <div className="row" style={{ marginTop: 10 }}>
-            <button onClick={refreshCallsigns} disabled={!bounds}>Load recent callsigns</button>
-            <select value={callsign} onChange={(e) => setCallsign(e.target.value)} style={{ minWidth: 220 }}>
-              <option value="">Select callsign…</option>
-              {callsigns.map(cs => <option key={cs} value={cs}>{cs}</option>)}
-            </select>
-            <button onClick={() => callsign && loadTrack(callsign)} disabled={!callsign}>Load track</button>
-            <span className="badge">Track points: {track.length.toLocaleString()}</span>
-          </div>
-        )}
-      </div>
+          <Typography variant="caption" sx={{ opacity: 1, color: "text.secondary" }}>End</Typography>
+          <Slider
+            value={rangeEnd ?? (bounds?.max ?? 0)}
+            min={bounds?.min ?? 0}
+            max={bounds?.max ?? 0}
+            onChange={(_, value) => setRangeEnd(Array.isArray(value) ? value[0] : value)}
+            disabled={!bounds}
+          />
+
+          <Button fullWidth size="small" variant="outlined" onClick={() => bounds && (setRangeStart(bounds.min), setRangeEnd(bounds.max), setT(bounds.max))} disabled={!bounds}>Full Range</Button>
+        </Paper>
+
+        <Paper variant="outlined" sx={{ p: 1.25, bgcolor: "rgba(255,255,255,0.03)" }}>
+          <Typography variant="overline" sx={{ opacity: 1, color: "text.secondary" }}>Filters</Typography>
+          <FormControl fullWidth size="small" sx={{ mb: 1 }}>
+            <InputLabel>Mode</InputLabel>
+            <Select label="Mode" value={mode} onChange={(e) => { setMode(e.target.value); setPlaying(false); }}>
+              <MenuItem value="all">All traffic</MenuItem>
+              <MenuItem value="track">Track callsign</MenuItem>
+            </Select>
+          </FormControl>
+
+          <FormControl fullWidth size="small" sx={{ mb: 1 }}>
+            <InputLabel>Replay airspace</InputLabel>
+            <Select label="Replay airspace" value={selectedAirspace} onChange={(e) => setSelectedAirspace(e.target.value)}>
+              <MenuItem value="">All airspaces</MenuItem>
+              {airspaceOptions.map((name) => (
+                <MenuItem key={name} value={name}>{name}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+
+          <TextField
+            label="Replay airport(s)"
+            size="small"
+            fullWidth
+            value={airportFilterText}
+            onChange={(e) => setAirportFilterText(e.target.value.toUpperCase())}
+            placeholder="KJFK, KLAX"
+            inputProps={{ list: "airport-options" }}
+          />
+          <datalist id="airport-options">
+            {airportOptions.map((name) => (
+              <option key={name} value={name} />
+            ))}
+          </datalist>
+        </Paper>
+
+        <Paper variant="outlined" sx={{ p: 1.25, bgcolor: "rgba(255,255,255,0.03)" }}>
+          <Typography variant="overline" sx={{ opacity: 1, color: "text.secondary" }}>Display</Typography>
+          <FormGroup>
+            <FormControlLabel control={<Checkbox checked={showAirspace} onChange={(e) => setShowAirspace(e.target.checked)} />} label="Show airspace" />
+            <FormControlLabel control={<Checkbox checked={showTracon} onChange={(e) => setShowTracon(e.target.checked)} />} label="Show TRACON" />
+            <FormControlLabel control={<Checkbox checked={showAltitude} onChange={(e) => setShowAltitude(e.target.checked)} />} label="Show altitude" />
+            <FormControlLabel control={<Checkbox checked={showGroundspeed} onChange={(e) => setShowGroundspeed(e.target.checked)} />} label="Show groundspeed" />
+            <FormControlLabel control={<Checkbox checked={showRouteAirports} onChange={(e) => setShowRouteAirports(e.target.checked)} />} label="Show dep-arr" />
+            <FormControlLabel control={<Checkbox checked={showPilotAirspace} onChange={(e) => setShowPilotAirspace(e.target.checked)} />} label="Show pilot airspace" />
+          </FormGroup>
+        </Paper>
+
+        <Paper variant="outlined" sx={{ p: 1.25, bgcolor: "rgba(255,255,255,0.03)" }}>
+          <Typography variant="overline" sx={{ opacity: 1, color: "text.secondary" }}>Selection</Typography>
+          {mode === "all" ? (
+            <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+              <Chip size="small" label={`Showing: ${snapshot.length.toLocaleString()} aircraft`} />
+              <Chip size="small" label={`Airspace: ${selectedAirspace || "All"}`} />
+              <Chip size="small" label={`Airport: ${airportFilterText || "All"}`} />
+            </Stack>
+          ) : (
+            <Stack spacing={1}>
+              <Button size="small" variant="outlined" onClick={refreshCallsigns} disabled={!bounds}>Load recent callsigns</Button>
+              <FormControl fullWidth size="small">
+                <InputLabel>Callsign</InputLabel>
+                <Select label="Callsign" value={callsign} onChange={(e) => setCallsign(e.target.value)}>
+                  <MenuItem value="">Select callsign…</MenuItem>
+                  {callsigns.map((cs) => <MenuItem key={cs} value={cs}>{cs}</MenuItem>)}
+                </Select>
+              </FormControl>
+              <Button size="small" variant="contained" onClick={() => callsign && loadTrack(callsign)} disabled={!callsign}>Load track</Button>
+              <Chip size="small" label={`Track points: ${track.length.toLocaleString()}`} />
+            </Stack>
+          )}
+        </Paper>
+      </Box>
+      </ThemeProvider>
 
       <MapContainer ref={mapRef} center={center} zoom={5} style={{ height: "100%", width: "100%" }}>
         <TileLayer
