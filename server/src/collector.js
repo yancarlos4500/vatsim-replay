@@ -1,17 +1,17 @@
 import fetch from "node-fetch";
 
 const VATSIM_URL = "https://data.vatsim.net/v3/vatsim-data.json";
-const VATSIM_FALLBACK_URLS = [
-  VATSIM_URL,
-  "https://data.vatsim.net/v3/vatsim-data-backup.json"
-];
 const FETCH_TIMEOUT_MS = 12000;
 const FETCH_RETRIES = 2;
 const RETRY_DELAY_MS = 750;
-const STALE_CACHE_MAX_AGE_MS = 10 * 60 * 1000;
+const STALE_CACHE_MAX_AGE_MS = 30 * 60 * 1000; // 30 minutes
 
 let lastGoodVatsimData = null;
 let lastGoodVatsimDataAtMs = 0;
+let lastFetchFailedAtMs = 0;
+let consecutiveFailures = 0;
+const CIRCUIT_BREAKER_THRESHOLD = 3;
+const CIRCUIT_BREAKER_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -37,30 +37,44 @@ async function fetchJsonWithTimeout(url, timeoutMs) {
 }
 
 async function fetchVatsimData() {
+  const now = Date.now();
+  const timeSinceLastFailure = now - lastFetchFailedAtMs;
+  const circuitBreakerOpen = consecutiveFailures >= CIRCUIT_BREAKER_THRESHOLD && timeSinceLastFailure < CIRCUIT_BREAKER_COOLDOWN_MS;
+
+  if (circuitBreakerOpen) {
+    const cacheAgeMs = now - lastGoodVatsimDataAtMs;
+    if (lastGoodVatsimData && cacheAgeMs <= STALE_CACHE_MAX_AGE_MS) {
+      console.warn(`[collector] circuit breaker open; using cached VATSIM data (${Math.floor(cacheAgeMs / 1000)}s old)`);
+      return lastGoodVatsimData;
+    }
+  }
+
   let lastError = null;
 
-  for (const url of VATSIM_FALLBACK_URLS) {
-    for (let attempt = 0; attempt <= FETCH_RETRIES; attempt += 1) {
-      try {
-        const data = await fetchJsonWithTimeout(url, FETCH_TIMEOUT_MS);
-        lastGoodVatsimData = data;
-        lastGoodVatsimDataAtMs = Date.now();
-        return data;
-      } catch (error) {
-        lastError = error;
-        if (attempt < FETCH_RETRIES) {
-          await delay(RETRY_DELAY_MS * (attempt + 1));
-        }
+  for (let attempt = 0; attempt <= FETCH_RETRIES; attempt += 1) {
+    try {
+      const data = await fetchJsonWithTimeout(VATSIM_URL, FETCH_TIMEOUT_MS);
+      lastGoodVatsimData = data;
+      lastGoodVatsimDataAtMs = Date.now();
+      consecutiveFailures = 0;
+      return data;
+    } catch (error) {
+      lastError = error;
+      consecutiveFailures += 1;
+      lastFetchFailedAtMs = Date.now();
+      if (attempt < FETCH_RETRIES) {
+        await delay(RETRY_DELAY_MS * (attempt + 1));
       }
     }
   }
 
-  const cacheAgeMs = Date.now() - lastGoodVatsimDataAtMs;
+  const cacheAgeMs = now - lastGoodVatsimDataAtMs;
   if (lastGoodVatsimData && cacheAgeMs <= STALE_CACHE_MAX_AGE_MS) {
     console.warn(`[collector] fetch failed; using cached VATSIM data (${Math.floor(cacheAgeMs / 1000)}s old): ${lastError?.message || lastError}`);
     return lastGoodVatsimData;
   }
 
+  console.error(`[collector] exhausted retries and cache expired; poll cannot proceed: ${lastError?.message || lastError}`);
   throw lastError;
 }
 
