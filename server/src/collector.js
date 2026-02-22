@@ -10,7 +10,7 @@ let lastGoodVatsimData = null;
 let lastGoodVatsimDataAtMs = 0;
 let lastFetchFailedAtMs = 0;
 let consecutiveFailures = 0;
-const CIRCUIT_BREAKER_THRESHOLD = 3;
+const CIRCUIT_BREAKER_THRESHOLD = 2; // Open after 2 consecutive failures
 const CIRCUIT_BREAKER_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
 
 function delay(ms) {

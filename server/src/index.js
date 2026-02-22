@@ -97,7 +97,10 @@ async function startCollector() {
     try {
       await pollOnce();
     } catch (e) {
-      console.error("[collector] poll failed:", e);
+      // Only log if not a timeout (AbortError); timeouts are handled by cache fallback
+      if (e?.type !== 'aborted') {
+        console.error("[collector] poll failed:", e?.message || e);
+      }
     }
   }, POLL_INTERVAL_SECONDS * 1000);
 }
