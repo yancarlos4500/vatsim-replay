@@ -16,7 +16,8 @@ import {
   FormGroup,
   FormControlLabel,
   Checkbox,
-  Slider
+  Slider,
+  LinearProgress
 } from "@mui/material";
 import { createTheme, ThemeProvider } from "@mui/material/styles";
 import { getMeta, getSnapshot, getCallsigns, getTrack, getAirspace, getAtcSnapshot, getTracon, getAirspaces, getAirports } from "./api";
@@ -333,6 +334,10 @@ export default function App() {
   const [rangeStart, setRangeStart] = useState(null);
   const [rangeEnd, setRangeEnd] = useState(null);
   const [mapBounds, setMapBounds] = useState(null);
+  const [preloadedSnapshots, setPreloadedSnapshots] = useState(new Map());
+  const [preloadedAtcSnapshots, setPreloadedAtcSnapshots] = useState(new Map());
+  const [isPreloading, setIsPreloading] = useState(false);
+  const [preloadProgress, setPreloadProgress] = useState(0);
   const planeIconCache = useRef(new Map());
   const mapRef = useRef(null);
 
@@ -453,23 +458,25 @@ useEffect(() => {
 }, [showTracon, tracon]);
 
   async function refreshSnapshot(ts) {
-    setLoading(true);
-    try {
-      const s = await getSnapshot(ts, selectedAirspace, airportFilterText);
-      setSnapshot(s.rows || []);
-    } finally {
-      setLoading(false);
+    // Only use preloaded snapshots
+    if (preloadedSnapshots.has(ts)) {
+      setSnapshot(preloadedSnapshots.get(ts));
+      return;
     }
+    
+    // If not preloaded, show empty snapshot
+    setSnapshot([]);
   }
 
   async function refreshAtcSnapshot(ts) {
-    try {
-      const a = await getAtcSnapshot(ts);
-      setAtcSnapshot(a.rows || []);
-    } catch (e) {
-      console.error("atc snapshot load failed", e);
-      setAtcSnapshot([]);
+    // Only use preloaded ATC snapshots
+    if (preloadedAtcSnapshots.has(ts)) {
+      setAtcSnapshot(preloadedAtcSnapshots.get(ts));
+      return;
     }
+    
+    // If not preloaded, show empty snapshot
+    setAtcSnapshot([]);
   }
 
   async function refreshCallsigns() {
@@ -506,6 +513,68 @@ useEffect(() => {
     setAirportOptions(unique);
   }
 
+  async function loadSnapshotsForRange() {
+    if (!rangeStart || !rangeEnd) return;
+    
+    setIsPreloading(true);
+    setPreloadProgress(0);
+    
+    try {
+      const snapshots = new Map();
+      const atcSnapshots = new Map();
+      const timestamps = [];
+      
+      // Generate all timestamps in the range at the poll interval
+      for (let ts = rangeStart; ts <= rangeEnd; ts += stepSeconds) {
+        timestamps.push(ts);
+      }
+      
+      const total = timestamps.length;
+      let loaded = 0;
+      
+      // Fetch snapshots in batches of 5 to avoid overloading the server
+      const batchSize = 5;
+      for (let i = 0; i < timestamps.length; i += batchSize) {
+        const batch = timestamps.slice(i, i + batchSize);
+        
+        // Fetch both pilot and ATC snapshots in parallel for each timestamp
+        const promises = batch.map(ts =>
+          Promise.all([
+            getSnapshot(ts, selectedAirspace, airportFilterText)
+              .then(data => ({ ts, data: data.rows || [] }))
+              .catch(e => {
+                console.error(`Failed to load snapshot for ${ts}:`, e);
+                return { ts, data: [] };
+              }),
+            getAtcSnapshot(ts)
+              .then(data => ({ ts, data: data.rows || [] }))
+              .catch(e => {
+                console.error(`Failed to load ATC snapshot for ${ts}:`, e);
+                return { ts, data: [] };
+              })
+          ])
+        );
+        
+        const results = await Promise.all(promises);
+        results.forEach(([pilotResult, atcResult]) => {
+          snapshots.set(pilotResult.ts, pilotResult.data);
+          atcSnapshots.set(atcResult.ts, atcResult.data);
+          loaded++;
+          setPreloadProgress(Math.round((loaded / total) * 100));
+        });
+      }
+      
+      setPreloadedSnapshots(snapshots);
+      setPreloadedAtcSnapshots(atcSnapshots);
+      setT(rangeStart); // Jump to start of range
+      setPlaying(true); // Auto-start playback
+    } catch (e) {
+      console.error("Failed to preload snapshots:", e);
+    } finally {
+      setIsPreloading(false);
+    }
+  }
+
   async function loadTrack(cs) {
     if (!bounds) return;
     setLoading(true);
@@ -538,6 +607,12 @@ useEffect(() => {
       setSelectedAirspace("");
     }
   }, [selectedAirspace, airspaceOptions]);
+
+  // Clear preloaded snapshots when filters change
+  useEffect(() => {
+    setPreloadedSnapshots(new Map());
+    setPreloadedAtcSnapshots(new Map());
+  }, [selectedAirspace, airportFilterText]);
 
 // Playback: advance by one stored step each "update", at updatesPerSecond rate
 useInterval(() => {
@@ -733,11 +808,53 @@ useEffect(() => {
         </Paper>
 
         <Paper variant="outlined" sx={{ p: 1.25, bgcolor: "rgba(255,255,255,0.03)" }}>
-          <Typography variant="overline" sx={{ opacity: 1, color: "text.secondary" }}>Playback</Typography>
+          <Typography variant="overline" sx={{ opacity: 1, color: "text.secondary" }}>Preload Snapshots</Typography>
+          
+          {isPreloading ? (
+            <Box sx={{ mb: 1 }}>
+              <LinearProgress variant="determinate" value={preloadProgress} />
+              <Typography variant="caption" sx={{ opacity: 1, color: "text.secondary" }}>Loading: {preloadProgress}%</Typography>
+            </Box>
+          ) : (
+            <Stack direction="row" spacing={1} sx={{ mb: 1.5 }}>
+              <Button 
+                variant={preloadedSnapshots.size > 0 ? "contained" : "outlined"} 
+                size="small" 
+                fullWidth
+                onClick={() => loadSnapshotsForRange()} 
+                disabled={!bounds || !rangeStart || !rangeEnd || isPreloading}
+              >
+                {preloadedSnapshots.size > 0 ? `✓ Loaded (${preloadedSnapshots.size})` : "Load Snapshots"}
+              </Button>
+            </Stack>
+          )}
+          
+          <Typography variant="overline" sx={{ opacity: 1, color: "text.secondary", mt: 1.5 }}>Playback</Typography>
           <Stack direction="row" spacing={1} sx={{ mb: 1 }}>
-            <Button variant="contained" size="small" onClick={() => setPlaying((p) => !p)} disabled={!bounds}>{playing ? "Pause" : "Play"}</Button>
-            <Button variant="outlined" size="small" onClick={() => bounds && setT(bounds.min)} disabled={!bounds}>Start</Button>
-            <Button variant="outlined" size="small" onClick={() => bounds && setT(bounds.max)} disabled={!bounds}>Live</Button>
+            <Button 
+              variant="contained" 
+              size="small" 
+              onClick={() => setPlaying((p) => !p)} 
+              disabled={!bounds || preloadedSnapshots.size === 0}
+            >
+              {playing ? "Pause" : "Play"}
+            </Button>
+            <Button 
+              variant="outlined" 
+              size="small" 
+              onClick={() => bounds && setT(bounds.min)} 
+              disabled={!bounds}
+            >
+              Start
+            </Button>
+            <Button 
+              variant="outlined" 
+              size="small" 
+              onClick={() => bounds && setT(bounds.max)} 
+              disabled={!bounds}
+            >
+              Live
+            </Button>
           </Stack>
 
           <FormControl fullWidth size="small" sx={{ mb: 1 }}>
@@ -753,7 +870,12 @@ useEffect(() => {
 
           <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1 }}>
             <Chip size="small" label={t ? fmt(t) : "—"} />
-            <Chip size="small" label={loading ? "Loading…" : "Ready"} />
+            <Chip 
+              size="small" 
+              label={isPreloading ? `Loading ${preloadProgress}%` : (preloadedSnapshots.size > 0 ? "Preloaded" : "Preload Required")} 
+              variant={preloadedSnapshots.size > 0 ? "filled" : "outlined"}
+              color={preloadedSnapshots.size > 0 ? "success" : "default"}
+            />
           </Stack>
 
           <Typography variant="caption" sx={{ opacity: 1, color: "text.secondary" }}>Timeline</Typography>
