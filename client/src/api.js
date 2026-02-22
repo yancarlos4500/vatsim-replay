@@ -4,9 +4,9 @@ export async function getMeta() {
   return r.json();
 }
 
-export async function getSnapshot(ts, airspace = "", airports = "", minAltitude = null, maxAltitude = null) {
+export async function getSnapshot(ts, airspaces = "", airports = "", minAltitude = null, maxAltitude = null) {
   const params = new URLSearchParams({ ts: String(ts) });
-  if (airspace) params.set("airspace", airspace);
+  if (airspaces) params.set("airspaces", airspaces);
   if (airports) params.set("airports", airports);
   if (minAltitude !== null && minAltitude >= 0) params.set("minAltitude", String(minAltitude));
   if (maxAltitude !== null && maxAltitude >= 0) params.set("maxAltitude", String(maxAltitude));
@@ -15,9 +15,9 @@ export async function getSnapshot(ts, airspace = "", airports = "", minAltitude 
   return r.json();
 }
 
-export async function getCallsigns(since, until, airspace = "", airports = "", minAltitude = null, maxAltitude = null) {
+export async function getCallsigns(since, until, airspaces = "", airports = "", minAltitude = null, maxAltitude = null) {
   const params = new URLSearchParams({ since: String(since), until: String(until), limit: "2000" });
-  if (airspace) params.set("airspace", airspace);
+  if (airspaces) params.set("airspaces", airspaces);
   if (airports) params.set("airports", airports);
   if (minAltitude !== null && minAltitude >= 0) params.set("minAltitude", String(minAltitude));
   if (maxAltitude !== null && maxAltitude >= 0) params.set("maxAltitude", String(maxAltitude));
@@ -26,9 +26,9 @@ export async function getCallsigns(since, until, airspace = "", airports = "", m
   return r.json();
 }
 
-export async function getTrack(callsign, since, until, step = 15, airspace = "", airports = "", minAltitude = null, maxAltitude = null) {
+export async function getTrack(callsign, since, until, step = 15, airspaces = "", airports = "", minAltitude = null, maxAltitude = null) {
   const params = new URLSearchParams({ since: String(since), until: String(until), step: String(step) });
-  if (airspace) params.set("airspace", airspace);
+  if (airspaces) params.set("airspaces", airspaces);
   if (airports) params.set("airports", airports);
   if (minAltitude !== null && minAltitude >= 0) params.set("minAltitude", String(minAltitude));
   if (maxAltitude !== null && maxAltitude >= 0) params.set("maxAltitude", String(maxAltitude));

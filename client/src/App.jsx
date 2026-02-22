@@ -327,7 +327,7 @@ export default function App() {
   const [showGroundspeed, setShowGroundspeed] = useState(true);
   const [showPilotAirspace, setShowPilotAirspace] = useState(true);
   const [showRouteAirports, setShowRouteAirports] = useState(true);
-  const [selectedAirspace, setSelectedAirspace] = useState("");
+  const [selectedAirspaces, setSelectedAirspaces] = useState([]);
   const [airspaceOptions, setAirspaceOptions] = useState([]);
   const [airportFilterText, setAirportFilterText] = useState("");
   const [airportOptions, setAirportOptions] = useState([]);
@@ -485,7 +485,8 @@ useEffect(() => {
     if (!bounds) return;
     const until = rangeEnd ?? bounds.max;
     const since = rangeStart ?? bounds.min; // last 6h
-    const r = await getCallsigns(since, until, selectedAirspace, airportFilterText);
+    const airspacesStr = selectedAirspaces.join(",");
+    const r = await getCallsigns(since, until, airspacesStr, airportFilterText);
     setCallsigns((r.rows || []).map(x => x.callsign).sort());
   }
 
@@ -498,7 +499,7 @@ useEffect(() => {
       (r.rows || [])
         .map((x) => (typeof x.airspace === "string" ? x.airspace.trim().toUpperCase() : ""))
         .filter(Boolean)
-    ));
+    )).sort();
     setAirspaceOptions(unique);
   }
 
@@ -511,7 +512,7 @@ useEffect(() => {
       (r.rows || [])
         .map((x) => (typeof x.airport === "string" ? x.airport.trim().toUpperCase() : ""))
         .filter(Boolean)
-    ));
+    )).sort();
     setAirportOptions(unique);
   }
 
@@ -529,6 +530,7 @@ useEffect(() => {
       // Parse altitude filters
       const minAlt = minAltitude && minAltitude.trim() ? parseInt(minAltitude, 10) : null;
       const maxAlt = maxAltitude && maxAltitude.trim() ? parseInt(maxAltitude, 10) : null;
+      const airspacesStr = selectedAirspaces.join(",");
       
       // Generate all timestamps in the range at the poll interval
       for (let ts = rangeStart; ts <= rangeEnd; ts += stepSeconds) {
@@ -546,7 +548,7 @@ useEffect(() => {
         // Fetch both pilot and ATC snapshots in parallel for each timestamp
         const promises = batch.map(ts =>
           Promise.all([
-            getSnapshot(ts, selectedAirspace, airportFilterText, minAlt, maxAlt)
+            getSnapshot(ts, airspacesStr, airportFilterText, minAlt, maxAlt)
               .then(data => ({ ts, data: data.rows || [] }))
               .catch(e => {
                 console.error(`Failed to load snapshot for ${ts}:`, e);
@@ -587,7 +589,8 @@ useEffect(() => {
     try {
       const until = rangeEnd ?? bounds.max;
     const since = rangeStart ?? bounds.min; // last 6h by default
-      const r = await getTrack(cs, since, until, 15, selectedAirspace, airportFilterText);
+      const airspacesStr = selectedAirspaces.join(",");
+      const r = await getTrack(cs, since, until, 15, airspacesStr, airportFilterText);
       setTrackState((r.rows || []).map(p => [p.lat, p.lon]));
     } finally {
       setLoading(false);
@@ -601,7 +604,7 @@ useEffect(() => {
       refreshSnapshot(t).catch(console.error);
     }
     refreshAtcSnapshot(t).catch(console.error);
-  }, [t, mode, selectedAirspace, airportFilterText]);
+  }, [t, mode, selectedAirspaces, airportFilterText]);
 
   useEffect(() => {
     refreshAirspaceOptions().catch(console.error);
@@ -609,16 +612,18 @@ useEffect(() => {
   }, [bounds, rangeStart, rangeEnd]);
 
   useEffect(() => {
-    if (selectedAirspace && !airspaceOptions.includes(selectedAirspace)) {
-      setSelectedAirspace("");
+    // Remove any selected airspaces that are no longer in options
+    const validAirspaces = selectedAirspaces.filter(a => airspaceOptions.includes(a));
+    if (validAirspaces.length !== selectedAirspaces.length) {
+      setSelectedAirspaces(validAirspaces);
     }
-  }, [selectedAirspace, airspaceOptions]);
+  }, [selectedAirspaces, airspaceOptions]);
 
   // Clear preloaded snapshots when filters change
   useEffect(() => {
     setPreloadedSnapshots(new Map());
     setPreloadedAtcSnapshots(new Map());
-  }, [selectedAirspace, airportFilterText, minAltitude, maxAltitude]);
+  }, [selectedAirspaces, airportFilterText, minAltitude, maxAltitude]);
 
 // Playback: advance by one stored step each "update", at updatesPerSecond rate
 useInterval(() => {
@@ -928,9 +933,14 @@ useEffect(() => {
           </FormControl>
 
           <FormControl fullWidth size="small" sx={{ mb: 1 }}>
-            <InputLabel>Replay airspace</InputLabel>
-            <Select label="Replay airspace" value={selectedAirspace} onChange={(e) => setSelectedAirspace(e.target.value)}>
-              <MenuItem value="">All airspaces</MenuItem>
+            <InputLabel>Replay airspace(s)</InputLabel>
+            <Select 
+              label="Replay airspace(s)" 
+              multiple
+              value={selectedAirspaces} 
+              onChange={(e) => setSelectedAirspaces(e.target.value)}
+              renderValue={(selected) => selected.length === 0 ? "All airspaces" : selected.join(", ")}
+            >
               {airspaceOptions.map((name) => (
                 <MenuItem key={name} value={name}>{name}</MenuItem>
               ))}
@@ -991,7 +1001,7 @@ useEffect(() => {
           {mode === "all" ? (
             <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
               <Chip size="small" label={`Showing: ${snapshot.length.toLocaleString()} aircraft`} />
-              <Chip size="small" label={`Airspace: ${selectedAirspace || "All"}`} />
+              <Chip size="small" label={`Airspace: ${selectedAirspaces.length === 0 ? "All" : selectedAirspaces.join(", ")}`} />
               <Chip size="small" label={`Airport: ${airportFilterText || "All"}`} />
               <Chip size="small" label={`Altitude: ${minAltitude || "0"} - ${maxAltitude || "∞"} ft`} />
             </Stack>

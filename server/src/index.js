@@ -1,14 +1,14 @@
-import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import express from "express";
 import fetch from "node-fetch";
-import { join, resolve, isAbsolute } from "node:path";
-import { existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { openDb, insertSnapshots, pruneOld, getCallsingsInRange, getTrack, getSnapshotAt, getRangeMeta, insertAtcSnapshots, pruneOldAtc, getAtcSnapshotAt, getAirspacesInRange, getAirportsInRange } from "./db.js";
-import { fetchPilots, fetchAtcPositions } from "./collector.js";
 import { AirspaceMatcher } from "./airspaceMatcher.js";
+import { fetchAtcPositions, fetchPilots } from "./collector.js";
+import { getAirportsInRange, getAirspacesInRange, getAtcSnapshotAt, getCallsingsInRange, getRangeMeta, getSnapshotAt, getTrack, insertAtcSnapshots, insertSnapshots, openDb, pruneOld, pruneOldAtc } from "./db.js";
 
 // Define __dirname for ES modules
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
@@ -144,7 +144,11 @@ app.get("/api/callsigns", (req, res) => {
   const since = parseInt(req.query.since || (now - 3600).toString(), 10);
   const until = parseInt(req.query.until || now.toString(), 10);
   const limit = parseInt(req.query.limit || "2000", 10);
-  const airspace = typeof req.query.airspace === "string" ? req.query.airspace.trim() : "";
+  const airspaces = parseAirportList(
+    typeof req.query.airspaces === "string"
+      ? req.query.airspaces
+      : (typeof req.query.airspace === "string" ? req.query.airspace : "")
+  );
   const airports = parseAirportList(
     typeof req.query.airports === "string"
       ? req.query.airports
@@ -152,8 +156,8 @@ app.get("/api/callsigns", (req, res) => {
   );
   const minAltitude = req.query.minAltitude ? parseInt(req.query.minAltitude, 10) : null;
   const maxAltitude = req.query.maxAltitude ? parseInt(req.query.maxAltitude, 10) : null;
-  const rows = getCallsingsInRange(db, since, until, limit, airspace || null, airports, minAltitude, maxAltitude);
-  res.json({ since, until, airspace: airspace || null, airports, minAltitude, maxAltitude, rows });
+  const rows = getCallsingsInRange(db, since, until, limit, airspaces, airports, minAltitude, maxAltitude);
+  res.json({ since, until, airspaces, airports, minAltitude, maxAltitude, rows });
 });
 
 app.get("/api/track/:callsign", (req, res) => {
@@ -162,7 +166,11 @@ app.get("/api/track/:callsign", (req, res) => {
   const since = parseInt(req.query.since || (now - 3600).toString(), 10);
   const until = parseInt(req.query.until || now.toString(), 10);
   const step = parseInt(req.query.step || "0", 10);
-  const airspace = typeof req.query.airspace === "string" ? req.query.airspace.trim() : "";
+  const airspaces = parseAirportList(
+    typeof req.query.airspaces === "string"
+      ? req.query.airspaces
+      : (typeof req.query.airspace === "string" ? req.query.airspace : "")
+  );
   const airports = parseAirportList(
     typeof req.query.airports === "string"
       ? req.query.airports
@@ -170,15 +178,19 @@ app.get("/api/track/:callsign", (req, res) => {
   );
   const minAltitude = req.query.minAltitude ? parseInt(req.query.minAltitude, 10) : null;
   const maxAltitude = req.query.maxAltitude ? parseInt(req.query.maxAltitude, 10) : null;
-  const rows = getTrack(db, callsign, since, until, step, airspace || null, airports, minAltitude, maxAltitude);
-  res.json({ callsign, since, until, step, airspace: airspace || null, airports, minAltitude, maxAltitude, rows });
+  const rows = getTrack(db, callsign, since, until, step, airspaces, airports, minAltitude, maxAltitude);
+  res.json({ callsign, since, until, step, airspaces, airports, minAltitude, maxAltitude, rows });
 });
 
 app.get("/api/snapshot", (req, res) => {
   const now = nowTs();
   const ts = parseInt(req.query.ts || now.toString(), 10);
   const window = parseInt(req.query.window || Math.max(5, Math.floor(POLL_INTERVAL_SECONDS / 2)).toString(), 10);
-  const airspace = typeof req.query.airspace === "string" ? req.query.airspace.trim() : "";
+  const airspaces = parseAirportList(
+    typeof req.query.airspaces === "string"
+      ? req.query.airspaces
+      : (typeof req.query.airspace === "string" ? req.query.airspace : "")
+  );
   const airports = parseAirportList(
     typeof req.query.airports === "string"
       ? req.query.airports
@@ -186,8 +198,8 @@ app.get("/api/snapshot", (req, res) => {
   );
   const minAltitude = req.query.minAltitude ? parseInt(req.query.minAltitude, 10) : null;
   const maxAltitude = req.query.maxAltitude ? parseInt(req.query.maxAltitude, 10) : null;
-  const rows = getSnapshotAt(db, ts, window, airspace || null, airports, minAltitude, maxAltitude);
-  res.json({ ts, window, airspace: airspace || null, airports, minAltitude, maxAltitude, rows });
+  const rows = getSnapshotAt(db, ts, window, airspaces, airports, minAltitude, maxAltitude);
+  res.json({ ts, window, airspaces, airports, minAltitude, maxAltitude, rows });
 });
 
 app.get("/api/airspaces", (req, res) => {

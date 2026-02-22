@@ -65,6 +65,22 @@ function buildAltitudeFilterClause(minAltitude, maxAltitude) {
   return { clause: conditions.length > 0 ? clause : "", params };
 }
 
+function buildAirspaceFilterClause(airspaces) {
+  const list = Array.isArray(airspaces)
+    ? airspaces.filter((code) => typeof code === "string" && code.trim().length > 0)
+    : [];
+
+  if (list.length === 0) {
+    return { clause: "", params: [] };
+  }
+
+  const placeholders = list.map(() => "?").join(",");
+  return {
+    clause: ` AND airspace IN (${placeholders})`,
+    params: list
+  };
+}
+
 export function openDb(dbPath) {
   mkdirSync(dirname(dbPath), { recursive: true });
   const db = new Database(dbPath);
@@ -135,7 +151,7 @@ export function pruneOld(db, cutoffTs) {
   return info.changes ?? 0;
 }
 
-export function getCallsingsInRange(db, sinceTs, untilTs, limit = 2000, airspace = null, airports = [], minAltitude = null, maxAltitude = null) {
+export function getCallsingsInRange(db, sinceTs, untilTs, limit = 2000, airspaces = [], airports = [], minAltitude = null, maxAltitude = null) {
   let sql = `
       SELECT callsign, MIN(ts) AS firstSeen, MAX(ts) AS lastSeen, COUNT(*) AS points
       FROM snapshots
@@ -143,10 +159,10 @@ export function getCallsingsInRange(db, sinceTs, untilTs, limit = 2000, airspace
     `;
 
   const params = [sinceTs, untilTs];
-  if (airspace && airspace.trim().length > 0) {
-    sql += ` AND airspace = ?`;
-    params.push(airspace);
-  }
+  
+  const airspaceFilter = buildAirspaceFilterClause(airspaces);
+  sql += airspaceFilter.clause;
+  params.push(...airspaceFilter.params);
 
   const airportFilter = buildAirportFilterClause(airports);
   sql += airportFilter.clause;
@@ -166,7 +182,7 @@ export function getCallsingsInRange(db, sinceTs, untilTs, limit = 2000, airspace
   return db.prepare(sql).all(...params);
 }
 
-export function getTrack(db, callsign, sinceTs, untilTs, stepSeconds = 0, airspace = null, airports = [], minAltitude = null, maxAltitude = null) {
+export function getTrack(db, callsign, sinceTs, untilTs, stepSeconds = 0, airspaces = [], airports = [], minAltitude = null, maxAltitude = null) {
   // optional downsample: return at most one point per stepSeconds bucket
   if (stepSeconds && stepSeconds > 0) {
     let sql = `
@@ -187,10 +203,10 @@ export function getTrack(db, callsign, sinceTs, untilTs, stepSeconds = 0, airspa
     `;
 
     const params = [stepSeconds, stepSeconds, callsign, sinceTs, untilTs];
-    if (airspace && airspace.trim().length > 0) {
-      sql += ` AND airspace = ?`;
-      params.push(airspace);
-    }
+    
+    const airspaceFilter = buildAirspaceFilterClause(airspaces);
+    sql += airspaceFilter.clause;
+    params.push(...airspaceFilter.params);
 
     const airportFilter = buildAirportFilterClause(airports);
     sql += airportFilter.clause;
@@ -215,10 +231,9 @@ export function getTrack(db, callsign, sinceTs, untilTs, stepSeconds = 0, airspa
     `;
   const params = [callsign, sinceTs, untilTs];
 
-  if (airspace && airspace.trim().length > 0) {
-    sql += ` AND airspace = ?`;
-    params.push(airspace);
-  }
+  const airspaceFilter = buildAirspaceFilterClause(airspaces);
+  sql += airspaceFilter.clause;
+  params.push(...airspaceFilter.params);
 
   const airportFilter = buildAirportFilterClause(airports);
   sql += airportFilter.clause;
@@ -232,7 +247,7 @@ export function getTrack(db, callsign, sinceTs, untilTs, stepSeconds = 0, airspa
   return db.prepare(sql).all(...params);
 }
 
-export function getSnapshotAt(db, ts, windowSeconds = 10, airspace = null, airports = [], minAltitude = null, maxAltitude = null) {
+export function getSnapshotAt(db, ts, windowSeconds = 10, airspaces = [], airports = [], minAltitude = null, maxAltitude = null) {
   // nearest window around ts
   const from = ts - windowSeconds;
   const to = ts + windowSeconds;
@@ -244,10 +259,9 @@ export function getSnapshotAt(db, ts, windowSeconds = 10, airspace = null, airpo
   `;
   const params = [from, to];
 
-  if (airspace && airspace.trim().length > 0) {
-    sql += ` AND airspace = ?`;
-    params.push(airspace);
-  }
+  const airspaceFilter = buildAirspaceFilterClause(airspaces);
+  sql += airspaceFilter.clause;
+  params.push(...airspaceFilter.params);
 
   const airportFilter = buildAirportFilterClause(airports);
   sql += airportFilter.clause;
