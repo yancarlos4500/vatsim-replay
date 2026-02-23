@@ -817,20 +817,37 @@ useEffect(() => {
       return [];
     }
 
-    const activeCallsigns = new Set(snapshot.map((p) => p.callsign));
-    if (activeCallsigns.size === 0) return [];
+    const TRAIL_POINTS_PER_AIRCRAFT = 10;
+    const currentByCallsign = new Map(snapshot.map((p) => [p.callsign, p]));
+    if (currentByCallsign.size === 0) return [];
 
     const timestamps = Array.from(preloadedSnapshots.keys())
       .filter((ts) => ts < t && (rangeStart == null || ts >= rangeStart))
       .sort((a, b) => a - b);
 
-    if (timestamps.length === 0) return [];
-
     const perAircraft = new Map();
-    for (const ts of timestamps) {
+
+    for (const [callsign, current] of currentByCallsign) {
+      if (!Number.isFinite(current?.lat) || !Number.isFinite(current?.lon)) continue;
+      if (hideBelow30Knots && Number.isFinite(current.groundspeed) && current.groundspeed < 30) continue;
+      if (mapBounds) {
+        if (current.lat < mapBounds.south || current.lat > mapBounds.north || current.lon < mapBounds.west || current.lon > mapBounds.east) {
+          continue;
+        }
+      }
+
+      perAircraft.set(callsign, [
+        { key: `${callsign}-${t}-${current.lat}-${current.lon}`, lat: current.lat, lon: current.lon }
+      ]);
+    }
+
+    for (let i = timestamps.length - 1; i >= 0; i--) {
+      const ts = timestamps[i];
       const rows = preloadedSnapshots.get(ts) || [];
       for (const p of rows) {
-        if (!activeCallsigns.has(p.callsign)) continue;
+        const existing = perAircraft.get(p.callsign);
+        if (!existing) continue;
+        if (existing.length >= TRAIL_POINTS_PER_AIRCRAFT) continue;
         if (!Number.isFinite(p.lat) || !Number.isFinite(p.lon)) continue;
         if (hideBelow30Knots && Number.isFinite(p.groundspeed) && p.groundspeed < 30) continue;
         if (mapBounds) {
@@ -839,11 +856,7 @@ useEffect(() => {
           }
         }
 
-        const existing = perAircraft.get(p.callsign) || [];
         existing.push({ key: `${p.callsign}-${ts}-${p.lat}-${p.lon}`, lat: p.lat, lon: p.lon });
-        if (existing.length > 5) {
-          existing.splice(0, existing.length - 5);
-        }
         perAircraft.set(p.callsign, existing);
       }
     }
