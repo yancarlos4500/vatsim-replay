@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { MapContainer, TileLayer, Marker, Polyline, GeoJSON } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Polyline, GeoJSON, CircleMarker } from "react-leaflet";
 import L from "leaflet";
 import {
   Box,
@@ -328,6 +328,7 @@ export default function App() {
   const [hideBelow30Knots, setHideBelow30Knots] = useState(false);
   const [showPilotAirspace, setShowPilotAirspace] = useState(true);
   const [showRouteAirports, setShowRouteAirports] = useState(true);
+  const [showHistoryTrail, setShowHistoryTrail] = useState(false);
   const [selectedAirspaces, setSelectedAirspaces] = useState([]);
   const [airspaceOptions, setAirspaceOptions] = useState([]);
   const [airportFilterText, setAirportFilterText] = useState("");
@@ -350,6 +351,7 @@ export default function App() {
   }, [meta]);
 
   const stepSeconds = meta?.pollIntervalSeconds ?? 15;
+  const sliderStepSeconds = 15;
 
   const { tracon: atcOnlineTracon, airspace: atcOnlineAirspace } = useMemo(
     () => buildAtcOnlineSets(atcSnapshot),
@@ -371,7 +373,8 @@ useEffect(() => {
       const m = await getMeta();
       setMeta(m);
       const start = m.maxTs ?? m.nowTs;
-      setRangeStart(m.minTs ?? (start - 3600));
+      const minTs = m.minTs ?? (start - (24 * 3600));
+      setRangeStart(Math.max(minTs, start - (5 * 3600)));
       setRangeEnd(m.maxTs ?? start);
       setT(start);
     })().catch(console.error);
@@ -485,7 +488,7 @@ useEffect(() => {
   async function refreshCallsigns() {
     if (!bounds) return;
     const until = rangeEnd ?? bounds.max;
-    const since = rangeStart ?? bounds.min; // last 6h
+    const since = rangeStart ?? bounds.min;
     const airspacesStr = selectedAirspaces.join(",");
     const r = await getCallsigns(since, until, airspacesStr, airportFilterText);
     setCallsigns((r.rows || []).map(x => x.callsign).sort());
@@ -589,7 +592,7 @@ useEffect(() => {
     setLoading(true);
     try {
       const until = rangeEnd ?? bounds.max;
-    const since = rangeStart ?? bounds.min; // last 6h by default
+      const since = rangeStart ?? bounds.min;
       const airspacesStr = selectedAirspaces.join(",");
       const r = await getTrack(cs, since, until, 15, airspacesStr, airportFilterText);
       setTrackState((r.rows || []).map(p => [p.lat, p.lon]));
@@ -809,6 +812,45 @@ useEffect(() => {
     ));
   }, [visibleSnapshot, getPlaneIcon, showRouteAirports, showAltitude, showGroundspeed, showPilotAirspace]);
 
+  const historyTrailDots = useMemo(() => {
+    if (!showHistoryTrail || mode !== "all" || t == null || preloadedSnapshots.size === 0 || snapshot.length === 0) {
+      return [];
+    }
+
+    const activeCallsigns = new Set(snapshot.map((p) => p.callsign));
+    if (activeCallsigns.size === 0) return [];
+
+    const timestamps = Array.from(preloadedSnapshots.keys())
+      .filter((ts) => ts < t && (rangeStart == null || ts >= rangeStart))
+      .sort((a, b) => a - b);
+
+    if (timestamps.length === 0) return [];
+
+    const perAircraft = new Map();
+    for (const ts of timestamps) {
+      const rows = preloadedSnapshots.get(ts) || [];
+      for (const p of rows) {
+        if (!activeCallsigns.has(p.callsign)) continue;
+        if (!Number.isFinite(p.lat) || !Number.isFinite(p.lon)) continue;
+        if (hideBelow30Knots && Number.isFinite(p.groundspeed) && p.groundspeed < 30) continue;
+        if (mapBounds) {
+          if (p.lat < mapBounds.south || p.lat > mapBounds.north || p.lon < mapBounds.west || p.lon > mapBounds.east) {
+            continue;
+          }
+        }
+
+        const existing = perAircraft.get(p.callsign) || [];
+        existing.push({ key: `${p.callsign}-${ts}-${p.lat}-${p.lon}`, lat: p.lat, lon: p.lon });
+        if (existing.length > 5) {
+          existing.splice(0, existing.length - 5);
+        }
+        perAircraft.set(p.callsign, existing);
+      }
+    }
+
+    return Array.from(perAircraft.values()).flat();
+  }, [showHistoryTrail, mode, t, preloadedSnapshots, snapshot, rangeStart, hideBelow30Knots, mapBounds]);
+
   return (
     <div className="mapWrap">
       <ThemeProvider theme={panelTheme}>
@@ -899,6 +941,7 @@ useEffect(() => {
             value={t ?? 0}
             min={rangeStart ?? (bounds?.min ?? 0)}
             max={rangeEnd ?? (bounds?.max ?? 0)}
+            step={sliderStepSeconds}
             onChange={(_, value) => setT(Array.isArray(value) ? value[0] : value)}
             disabled={!bounds}
           />
@@ -911,6 +954,7 @@ useEffect(() => {
             value={rangeStart ?? (bounds?.min ?? 0)}
             min={bounds?.min ?? 0}
             max={bounds?.max ?? 0}
+            step={sliderStepSeconds}
             onChange={(_, value) => setRangeStart(Array.isArray(value) ? value[0] : value)}
             disabled={!bounds}
           />
@@ -920,6 +964,7 @@ useEffect(() => {
             value={rangeEnd ?? (bounds?.max ?? 0)}
             min={bounds?.min ?? 0}
             max={bounds?.max ?? 0}
+            step={sliderStepSeconds}
             onChange={(_, value) => setRangeEnd(Array.isArray(value) ? value[0] : value)}
             disabled={!bounds}
           />
@@ -994,6 +1039,7 @@ useEffect(() => {
           <FormGroup>
             <FormControlLabel control={<Checkbox checked={showAirspace} onChange={(e) => setShowAirspace(e.target.checked)} />} label="Show airspace" />
             <FormControlLabel control={<Checkbox checked={showTracon} onChange={(e) => setShowTracon(e.target.checked)} />} label="Show TRACON" />
+            <FormControlLabel control={<Checkbox checked={showHistoryTrail} onChange={(e) => setShowHistoryTrail(e.target.checked)} />} label="Show history trail" />
             <FormControlLabel control={<Checkbox checked={showAltitude} onChange={(e) => setShowAltitude(e.target.checked)} />} label="Show altitude" />
             <FormControlLabel control={<Checkbox checked={showGroundspeed} onChange={(e) => setShowGroundspeed(e.target.checked)} />} label="Show groundspeed" />
             <FormControlLabel control={<Checkbox checked={hideBelow30Knots} onChange={(e) => setHideBelow30Knots(e.target.checked)} />} label="< 30 knots" />
@@ -1043,6 +1089,15 @@ useEffect(() => {
           <GeoJSON data={visibleTracon} style={traconStyle} />
         )}
 
+
+        {mode === "all" && showHistoryTrail && historyTrailDots.map((p) => (
+          <CircleMarker
+            key={p.key}
+            center={[p.lat, p.lon]}
+            radius={2}
+            pathOptions={{ color: "#66b2ff", fillColor: "#66b2ff", fillOpacity: 0.35, weight: 0 }}
+          />
+        ))}
 
         {mode === "all" && snapshotMarkers}
 
