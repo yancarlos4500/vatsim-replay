@@ -525,6 +525,7 @@ useEffect(() => {
     
     setIsPreloading(true);
     setPreloadProgress(0);
+    let progressTimer = null;
     
     try {
       const snapshots = new Map();
@@ -534,6 +535,13 @@ useEffect(() => {
       const minAlt = minAltitude && minAltitude.trim() ? parseInt(minAltitude, 10) : null;
       const maxAlt = maxAltitude && maxAltitude.trim() ? parseInt(maxAltitude, 10) : null;
       const airspacesStr = selectedAirspaces.join(",");
+
+      progressTimer = setInterval(() => {
+        setPreloadProgress((prev) => {
+          if (prev >= 90) return 90;
+          return Math.min(90, prev + 2);
+        });
+      }, 120);
 
       const result = await getPreloadSnapshots(
         rangeStart,
@@ -550,11 +558,21 @@ useEffect(() => {
       const atcRowsByTs = result?.atcRowsByTs ?? {};
       const total = timestamps.length || 1;
 
+      if (progressTimer) {
+        clearInterval(progressTimer);
+        progressTimer = null;
+      }
+
       timestamps.forEach((ts, index) => {
         snapshots.set(ts, rowsByTs[String(ts)] || rowsByTs[ts] || []);
         atcSnapshots.set(ts, atcRowsByTs[String(ts)] || atcRowsByTs[ts] || []);
-        setPreloadProgress(Math.round(((index + 1) / total) * 100));
+        const mappedProgress = 90 + Math.round(((index + 1) / total) * 10);
+        setPreloadProgress(Math.min(100, mappedProgress));
       });
+
+      if (timestamps.length === 0) {
+        setPreloadProgress(100);
+      }
       
       setPreloadedSnapshots(snapshots);
       setPreloadedAtcSnapshots(atcSnapshots);
@@ -562,7 +580,11 @@ useEffect(() => {
       setPlaying(true); // Auto-start playback
     } catch (e) {
       console.error("Failed to preload snapshots:", e);
+      setPreloadProgress(0);
     } finally {
+      if (progressTimer) {
+        clearInterval(progressTimer);
+      }
       setIsPreloading(false);
     }
   }

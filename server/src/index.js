@@ -1,3 +1,4 @@
+import compression from "compression";
 import cors from "cors";
 import dotenv from "dotenv";
 import express from "express";
@@ -39,6 +40,7 @@ function resolveDbPath() {
 const DB_PATH = resolveDbPath();
 
 const app = express();
+app.use(compression());
 app.use(cors());
 app.use(express.json());
 
