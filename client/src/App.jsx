@@ -534,7 +534,26 @@ useEffect(() => {
   }
 
   async function loadSnapshotsForRange() {
-    if (!rangeStart || !rangeEnd) return;
+    // Use explicit null check instead of falsy check to allow timestamp 0
+    if (rangeStart == null || rangeEnd == null) {
+      console.warn("[preload] range not initialized", { rangeStart, rangeEnd });
+      return;
+    }
+    
+    // Ensure parameters are numbers
+    const since = Number(rangeStart);
+    const until = Number(rangeEnd);
+    const step = Number(stepSeconds);
+    
+    if (!Number.isFinite(since) || !Number.isFinite(until) || !Number.isFinite(step)) {
+      console.error("[preload] invalid numeric parameters", { since, until, step, rangeStart, rangeEnd, stepSeconds });
+      return;
+    }
+    
+    if (until < since) {
+      console.error("[preload] end time before start time", { since, until });
+      return;
+    }
     
     setIsPreloading(true);
     setPreloadProgress(0);
@@ -557,9 +576,9 @@ useEffect(() => {
       }, 120);
 
       const result = await getPreloadSnapshots(
-        rangeStart,
-        rangeEnd,
-        stepSeconds,
+        since,
+        until,
+        step,
         airspacesStr,
         airportFilterText,
         minAlt,

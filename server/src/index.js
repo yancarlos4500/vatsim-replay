@@ -268,8 +268,21 @@ app.get("/api/preload-snapshots", (req, res) => {
   const minAltitude = req.query.minAltitude ? parseInt(req.query.minAltitude, 10) : null;
   const maxAltitude = req.query.maxAltitude ? parseInt(req.query.maxAltitude, 10) : null;
 
-  if (!Number.isFinite(since) || !Number.isFinite(until) || !Number.isFinite(step) || step <= 0 || until < since) {
-    return res.status(400).json({ error: "invalid range parameters" });
+  // Detailed validation with specific error messages
+  if (!Number.isFinite(since)) {
+    return res.status(400).json({ error: "invalid 'since' parameter", received: req.query.since, parsed: since });
+  }
+  if (!Number.isFinite(until)) {
+    return res.status(400).json({ error: "invalid 'until' parameter", received: req.query.until, parsed: until });
+  }
+  if (!Number.isFinite(step)) {
+    return res.status(400).json({ error: "invalid 'step' parameter", received: req.query.step, parsed: step });
+  }
+  if (step <= 0) {
+    return res.status(400).json({ error: "step must be positive", received: step });
+  }
+  if (until < since) {
+    return res.status(400).json({ error: "until must be >= since", since, until });
   }
 
   const bucketCount = Math.floor((until - since) / step) + 1;

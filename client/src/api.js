@@ -97,8 +97,15 @@ export async function getPreloadSnapshots(since, until, step, airspaces = "", ai
   if (minAltitude !== null && minAltitude >= 0) params.set("minAltitude", String(minAltitude));
   if (maxAltitude !== null && maxAltitude >= 0) params.set("maxAltitude", String(maxAltitude));
 
-  const r = await fetch(`/api/preload-snapshots?${params.toString()}`);
-  if (!r.ok) throw new Error("preload snapshots failed");
+  const url = `/api/preload-snapshots?${params.toString()}`;
+  console.log("[preload] sending request:", { since, until, step, airspaces, airports, minAltitude, maxAltitude, url });
+  
+  const r = await fetch(url);
+  if (!r.ok) {
+    const errorBody = await r.text();
+    console.error("[preload] failed with status", r.status, "body:", errorBody);
+    throw new Error(`preload snapshots failed: ${r.status} - ${errorBody}`);
+  }
   return r.json();
 }
 
