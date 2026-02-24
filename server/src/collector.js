@@ -15,6 +15,7 @@ let lastGoodVatsimData = null;
 let lastGoodVatsimDataAtMs = 0;
 let lastFetchFailedAtMs = 0;
 let consecutiveFailures = 0;
+let inFlightVatsimFetchPromise = null;
 const CIRCUIT_BREAKER_THRESHOLD = 2; // Open after 2 consecutive failures
 const CIRCUIT_BREAKER_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -93,8 +94,17 @@ async function fetchVatsimData() {
   return EMPTY_VATSIM_DATA;
 }
 
+async function fetchVatsimDataShared() {
+  if (!inFlightVatsimFetchPromise) {
+    inFlightVatsimFetchPromise = fetchVatsimData().finally(() => {
+      inFlightVatsimFetchPromise = null;
+    });
+  }
+  return inFlightVatsimFetchPromise;
+}
+
 export async function fetchPilots() {
-  const data = await fetchVatsimData();
+  const data = await fetchVatsimDataShared();
   // VATSIM v3: pilots under data.pilots
   const pilots = Array.isArray(data?.pilots) ? data.pilots : [];
   // Normalize just what we store
@@ -114,7 +124,7 @@ export async function fetchPilots() {
 }
 
 export async function fetchAtcPositions() {
-  const data = await fetchVatsimData();
+  const data = await fetchVatsimDataShared();
   // VATSIM v3: controllers under data.controllers
   const controllers = Array.isArray(data?.controllers) ? data.controllers : [];
   // Normalize: extract callsign and facility (ATC position/sector)

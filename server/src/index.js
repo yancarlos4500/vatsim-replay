@@ -86,6 +86,7 @@ async function pollOnce() {
 }
 
 let pollTimer = null;
+let pollInProgress = false;
 
 async function warmupGeoJsonCaches() {
   // Pre-warm airspace cache in background
@@ -111,24 +112,26 @@ async function startCollector() {
   // Warm up GeoJSON caches in background
   warmupGeoJsonCaches();
 
-  // Start recurring polls
-  pollTimer = setInterval(async () => {
+  const runPollCycle = async () => {
+    if (pollInProgress) {
+      pollTimer = setTimeout(runPollCycle, POLL_INTERVAL_SECONDS * 1000);
+      return;
+    }
+
+    pollInProgress = true;
     try {
       await pollOnce();
     } catch (e) {
-      // Only log if not a timeout (AbortError); timeouts are handled by cache fallback
-      if (e?.type !== 'aborted') {
+      if (e?.type !== "aborted") {
         console.error("[collector] poll failed:", e?.message || e);
       }
+    } finally {
+      pollInProgress = false;
+      pollTimer = setTimeout(runPollCycle, POLL_INTERVAL_SECONDS * 1000);
     }
-  }, POLL_INTERVAL_SECONDS * 1000);
+  };
 
-  // First poll in background (non-blocking) to warm up cache
-  pollOnce().catch(e => {
-    if (e?.type !== 'aborted') {
-      console.error("[collector] initial poll failed:", e?.message || e);
-    }
-  });
+  runPollCycle();
 }
 
 app.get("/api/meta", (req, res) => {
