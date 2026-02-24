@@ -337,6 +337,8 @@ export default function App() {
   const [maxAltitude, setMaxAltitude] = useState("");
   const [rangeStart, setRangeStart] = useState(null);
   const [rangeEnd, setRangeEnd] = useState(null);
+  const [debouncedRangeStart, setDebouncedRangeStart] = useState(null);
+  const [debouncedRangeEnd, setDebouncedRangeEnd] = useState(null);
   const [mapBounds, setMapBounds] = useState(null);
   const [preloadedSnapshots, setPreloadedSnapshots] = useState(new Map());
   const [preloadedAtcSnapshots, setPreloadedAtcSnapshots] = useState(new Map());
@@ -365,6 +367,15 @@ useEffect(() => {
   if (t > rangeEnd) setT(rangeEnd);
 }, [rangeStart, rangeEnd]);
 
+useEffect(() => {
+  const id = setTimeout(() => {
+    setDebouncedRangeStart(rangeStart);
+    setDebouncedRangeEnd(rangeEnd);
+  }, 300);
+
+  return () => clearTimeout(id);
+}, [rangeStart, rangeEnd]);
+
 
 
 
@@ -376,6 +387,8 @@ useEffect(() => {
       const minTs = m.minTs ?? (start - (24 * 3600));
       setRangeStart(Math.max(minTs, start - (5 * 3600)));
       setRangeEnd(m.maxTs ?? start);
+      setDebouncedRangeStart(Math.max(minTs, start - (5 * 3600)));
+      setDebouncedRangeEnd(m.maxTs ?? start);
       setT(start);
     })().catch(console.error);
   }, []);
@@ -496,8 +509,8 @@ useEffect(() => {
 
   async function refreshAirspaceOptions() {
     if (!bounds) return;
-    const until = rangeEnd ?? bounds.max;
-    const since = rangeStart ?? bounds.min;
+    const until = debouncedRangeEnd ?? bounds.max;
+    const since = debouncedRangeStart ?? bounds.min;
     const r = await getAirspaces(since, until);
     const unique = Array.from(new Set(
       (r.rows || [])
@@ -509,8 +522,8 @@ useEffect(() => {
 
   async function refreshAirportOptions() {
     if (!bounds) return;
-    const until = rangeEnd ?? bounds.max;
-    const since = rangeStart ?? bounds.min;
+    const until = debouncedRangeEnd ?? bounds.max;
+    const since = debouncedRangeStart ?? bounds.min;
     const r = await getAirports(since, until);
     const unique = Array.from(new Set(
       (r.rows || [])
@@ -615,7 +628,7 @@ useEffect(() => {
   useEffect(() => {
     refreshAirspaceOptions().catch(console.error);
     refreshAirportOptions().catch(console.error);
-  }, [bounds, rangeStart, rangeEnd]);
+  }, [bounds, debouncedRangeStart, debouncedRangeEnd]);
 
   useEffect(() => {
     // Remove any selected airspaces that are no longer in options
@@ -807,7 +820,7 @@ useEffect(() => {
 
     return visibleSnapshot.map((p) => (
       <Marker
-        key={`${p.callsign}-${p.ts}-${p.lat}-${p.lon}`}
+        key={`${p.callsign}-${t}-${p.lat}-${p.lon}`}
         position={[p.lat, p.lon]}
         icon={getPlaneIcon(p.callsign, p.heading, formatDetailRows(p))}
       />

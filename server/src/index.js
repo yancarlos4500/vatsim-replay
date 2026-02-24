@@ -213,6 +213,7 @@ app.get("/api/airspaces", (req, res) => {
   const until = parseInt(req.query.until || now.toString(), 10);
   const limit = parseInt(req.query.limit || "2000", 10);
   const rows = getAirspacesInRange(db, since, until, limit);
+  res.set("Cache-Control", "public, max-age=5");
   res.json({ since, until, rows });
 });
 
@@ -222,6 +223,7 @@ app.get("/api/airports", (req, res) => {
   const until = parseInt(req.query.until || now.toString(), 10);
   const limit = parseInt(req.query.limit || "3000", 10);
   const rows = getAirportsInRange(db, since, until, limit);
+  res.set("Cache-Control", "public, max-age=5");
   res.json({ since, until, rows });
 });
 
@@ -319,8 +321,8 @@ app.get("/api/preload-snapshots", (req, res) => {
   for (const bucketTs of timestamps) {
     const sourceTsForBucket = bucketToSourceTs.get(bucketTs);
     if (sourceTsForBucket == null) continue;
-    rowsByTs[bucketTs] = pilotBySourceTs.get(sourceTsForBucket) || [];
-    atcRowsByTs[bucketTs] = atcBySourceTs.get(sourceTsForBucket) || [];
+    rowsByTs[bucketTs] = (pilotBySourceTs.get(sourceTsForBucket) || []).map(({ ts, ...row }) => row);
+    atcRowsByTs[bucketTs] = (atcBySourceTs.get(sourceTsForBucket) || []).map(({ ts, ...row }) => row);
   }
 
   res.json({
@@ -342,7 +344,6 @@ const AIRSPACE_URLS = [
   "https://raw.githubusercontent.com/vatsimnetwork/vatspy-data-project/main/Boundaries.geojson",
   "https://raw.githubusercontent.com/vatsimnetwork/vatspy-data-project/master/Boundaries.geojson"
 ];
-const TRACON_URL = "https://raw.githubusercontent.com/vatsimnetwork/simaware-tracon-project/main/Boundaries/N90/NY.json";
 const TRACON_LOCAL_DIR = resolve(join(__dirname, "../data/tracon"));
 const TRACON_BOUNDARIES_FILES = [
   resolve(join(__dirname, "../data/TRACONBoundaries.geojson")),
@@ -492,7 +493,7 @@ app.get("/api/atc-online", async (req, res) => {
     }
     const positions = await fetchAtcPositions();
     atcCache = { ts: now, positions };
-    console.log(`[atc] fetched ${positions.length} ATC positions. Sample:`, positions.slice(0, 3));
+    console.log(`[atc] fetched ${positions.length} ATC positions`);
     res.json({ positions });
   } catch (e) {
     res.status(500).json({ error: "atc fetch failed", message: String(e?.message || e) });
