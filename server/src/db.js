@@ -118,6 +118,9 @@ export function openDb(dbPath) {
   db.exec(`CREATE INDEX IF NOT EXISTS idx_snapshots_airspace_ts ON snapshots(airspace, ts);`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_snapshots_departure_ts ON snapshots(departure, ts);`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_snapshots_destination_ts ON snapshots(destination, ts);`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_snapshots_ts_airspace ON snapshots(ts, airspace);`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_snapshots_ts_departure ON snapshots(ts, departure);`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_snapshots_ts_destination ON snapshots(ts, destination);`);
   return db;
 }
 
@@ -347,16 +350,19 @@ export function getAirspacesInRange(db, sinceTs, untilTs, limit = 2000) {
 
 export function getAirportsInRange(db, sinceTs, untilTs, limit = 3000) {
   return db.prepare(`
-    SELECT airport, COUNT(*) AS points
+    SELECT airport, SUM(points) AS points
     FROM (
-      SELECT departure AS airport
+      SELECT departure AS airport, COUNT(*) AS points
       FROM snapshots
       WHERE ts BETWEEN ? AND ? AND departure IS NOT NULL AND departure <> ''
+      GROUP BY departure
       UNION ALL
-      SELECT destination AS airport
+      SELECT destination AS airport, COUNT(*) AS points
       FROM snapshots
       WHERE ts BETWEEN ? AND ? AND destination IS NOT NULL AND destination <> ''
+      GROUP BY destination
     )
+    WHERE airport IS NOT NULL AND airport <> ''
     GROUP BY airport
     ORDER BY points DESC, airport ASC
     LIMIT ?

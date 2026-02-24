@@ -212,7 +212,14 @@ app.get("/api/airspaces", (req, res) => {
   const since = parseInt(req.query.since || (now - 3600).toString(), 10);
   const until = parseInt(req.query.until || now.toString(), 10);
   const limit = parseInt(req.query.limit || "2000", 10);
+  
+  const cached = getCached("airspaces", since, until, limit);
+  if (cached) {
+    return res.set("Cache-Control", "public, max-age=5").json({ since, until, rows: cached });
+  }
+  
   const rows = getAirspacesInRange(db, since, until, limit);
+  setCached("airspaces", since, until, limit, rows);
   res.set("Cache-Control", "public, max-age=5");
   res.json({ since, until, rows });
 });
@@ -222,7 +229,14 @@ app.get("/api/airports", (req, res) => {
   const since = parseInt(req.query.since || (now - 3600).toString(), 10);
   const until = parseInt(req.query.until || now.toString(), 10);
   const limit = parseInt(req.query.limit || "3000", 10);
+  
+  const cached = getCached("airports", since, until, limit);
+  if (cached) {
+    return res.set("Cache-Control", "public, max-age=5").json({ since, until, rows: cached });
+  }
+  
   const rows = getAirportsInRange(db, since, until, limit);
+  setCached("airports", since, until, limit, rows);
   res.set("Cache-Control", "public, max-age=5");
   res.json({ since, until, rows });
 });
@@ -355,6 +369,27 @@ console.log('[init] TRACON_BOUNDARIES_FILES:', TRACON_BOUNDARIES_FILES);
 let airspaceCache = { ts: 0, data: null };
 let traconCache = { ts: 0, data: null };
 let atcCache = { ts: 0, positions: [] };
+
+const queryCache = new Map();
+const QUERY_CACHE_TTL_MS = 2000;
+
+function getCacheKey(prefix, since, until, limit) {
+  return `${prefix}:${since}:${until}:${limit}`;
+}
+
+function getCached(prefix, since, until, limit) {
+  const key = getCacheKey(prefix, since, until, limit);
+  const cached = queryCache.get(key);
+  if (cached && Date.now() - cached.ts < QUERY_CACHE_TTL_MS) {
+    return cached.data;
+  }
+  return null;
+}
+
+function setCached(prefix, since, until, limit, data) {
+  const key = getCacheKey(prefix, since, until, limit);
+  queryCache.set(key, { ts: Date.now(), data });
+}
 
 app.get("/api/airspace", async (req, res) => {
   try {
