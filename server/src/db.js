@@ -298,6 +298,42 @@ export function getSnapshotsBetween(db, sinceTs, untilTs, airspaces = [], airpor
   return db.prepare(sql).all(...params);
 }
 
+export function getSnapshotTimestampsInRange(db, sinceTs, untilTs) {
+  return db.prepare(`
+    SELECT DISTINCT ts
+    FROM snapshots
+    WHERE ts BETWEEN ? AND ?
+    ORDER BY ts ASC
+  `).all(sinceTs, untilTs).map((r) => r.ts);
+}
+
+export function getSnapshotsAtTimestamps(db, timestamps, airspaces = [], airports = [], minAltitude = null, maxAltitude = null) {
+  if (!Array.isArray(timestamps) || timestamps.length === 0) return [];
+
+  const placeholders = timestamps.map(() => "?").join(",");
+  let sql = `
+    SELECT ts, callsign, lat, lon, altitude, groundspeed, heading, airspace, departure, destination
+    FROM snapshots
+    WHERE ts IN (${placeholders})
+  `;
+  const params = [...timestamps];
+
+  const airspaceFilter = buildAirspaceFilterClause(airspaces);
+  sql += airspaceFilter.clause;
+  params.push(...airspaceFilter.params);
+
+  const airportFilter = buildAirportFilterClause(airports);
+  sql += airportFilter.clause;
+  params.push(...airportFilter.params);
+
+  const altitudeFilter = buildAltitudeFilterClause(minAltitude, maxAltitude);
+  sql += altitudeFilter.clause;
+  params.push(...altitudeFilter.params);
+
+  sql += ` ORDER BY ts ASC`;
+  return db.prepare(sql).all(...params);
+}
+
 export function getAirspacesInRange(db, sinceTs, untilTs, limit = 2000) {
   return db.prepare(`
     SELECT airspace, COUNT(*) AS points
@@ -379,4 +415,15 @@ export function getAtcSnapshotsBetween(db, sinceTs, untilTs) {
     WHERE ts BETWEEN ? AND ?
     ORDER BY ts ASC
   `).all(sinceTs, untilTs);
+}
+
+export function getAtcSnapshotsAtTimestamps(db, timestamps) {
+  if (!Array.isArray(timestamps) || timestamps.length === 0) return [];
+  const placeholders = timestamps.map(() => "?").join(",");
+  return db.prepare(`
+    SELECT ts, callsign, frequency, facility, lat, lon
+    FROM atc_snapshots
+    WHERE ts IN (${placeholders})
+    ORDER BY ts ASC
+  `).all(...timestamps);
 }

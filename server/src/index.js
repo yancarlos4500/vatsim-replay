@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 
 import { AirspaceMatcher } from "./airspaceMatcher.js";
 import { fetchAtcPositions, fetchPilots } from "./collector.js";
-import { getAirportsInRange, getAirspacesInRange, getAtcSnapshotAt, getAtcSnapshotsBetween, getCallsingsInRange, getRangeMeta, getSnapshotAt, getSnapshotsBetween, getTrack, insertAtcSnapshots, insertSnapshots, openDb, pruneOld, pruneOldAtc } from "./db.js";
+import { getAirportsInRange, getAirspacesInRange, getAtcSnapshotAt, getAtcSnapshotsAtTimestamps, getCallsingsInRange, getRangeMeta, getSnapshotAt, getSnapshotTimestampsInRange, getSnapshotsAtTimestamps, getTrack, insertAtcSnapshots, insertSnapshots, openDb, pruneOld, pruneOldAtc } from "./db.js";
 
 // Define __dirname for ES modules
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
@@ -253,10 +253,19 @@ app.get("/api/preload-snapshots", (req, res) => {
     return res.status(400).json({ error: "invalid range parameters" });
   }
 
+  const bucketCount = Math.floor((until - since) / step) + 1;
+  const MAX_BUCKETS = 2000;
+  if (bucketCount > MAX_BUCKETS) {
+    return res.status(400).json({
+      error: "range too large",
+      maxBuckets: MAX_BUCKETS,
+      requestedBuckets: bucketCount
+    });
+  }
+
   const from = since - window;
   const to = until + window;
-  const pilotRows = getSnapshotsBetween(db, from, to, airspaces, airports, minAltitude, maxAltitude);
-  const atcRows = getAtcSnapshotsBetween(db, from, to);
+  const availableTs = getSnapshotTimestampsInRange(db, from, to);
 
   const timestamps = [];
   const rowsByTs = {};
@@ -267,17 +276,49 @@ app.get("/api/preload-snapshots", (req, res) => {
     atcRowsByTs[ts] = [];
   }
 
-  const assignToNearestBucket = (bucketMap, row) => {
-    const nearest = since + Math.round((row.ts - since) / step) * step;
-    if (nearest < since || nearest > until) return;
-    if (Math.abs(row.ts - nearest) > window) return;
-    const key = String(nearest);
-    if (!bucketMap[key]) bucketMap[key] = [];
-    bucketMap[key].push(row);
-  };
+  const bucketToSourceTs = new Map();
+  if (availableTs.length > 0) {
+    let index = 0;
+    for (const bucketTs of timestamps) {
+      while (index + 1 < availableTs.length && availableTs[index + 1] <= bucketTs) {
+        index += 1;
+      }
 
-  pilotRows.forEach((row) => assignToNearestBucket(rowsByTs, row));
-  atcRows.forEach((row) => assignToNearestBucket(atcRowsByTs, row));
+      const left = availableTs[index];
+      const right = index + 1 < availableTs.length ? availableTs[index + 1] : null;
+      let nearest = left;
+      if (right != null && Math.abs(right - bucketTs) < Math.abs(left - bucketTs)) {
+        nearest = right;
+      }
+
+      if (Math.abs(nearest - bucketTs) <= window) {
+        bucketToSourceTs.set(bucketTs, nearest);
+      }
+    }
+  }
+
+  const sourceTs = Array.from(new Set(Array.from(bucketToSourceTs.values())));
+  const pilotRows = getSnapshotsAtTimestamps(db, sourceTs, airspaces, airports, minAltitude, maxAltitude);
+  const atcRows = getAtcSnapshotsAtTimestamps(db, sourceTs);
+
+  const pilotBySourceTs = new Map();
+  for (const row of pilotRows) {
+    if (!pilotBySourceTs.has(row.ts)) pilotBySourceTs.set(row.ts, []);
+    pilotBySourceTs.get(row.ts).push(row);
+  }
+
+  const atcBySourceTs = new Map();
+  for (const row of atcRows) {
+    if (!atcBySourceTs.has(row.ts)) atcBySourceTs.set(row.ts, []);
+    atcBySourceTs.get(row.ts).push(row);
+  }
+
+  for (const bucketTs of timestamps) {
+    const sourceTsForBucket = bucketToSourceTs.get(bucketTs);
+    if (sourceTsForBucket == null) continue;
+    rowsByTs[bucketTs] = pilotBySourceTs.get(sourceTsForBucket) || [];
+    atcRowsByTs[bucketTs] = atcBySourceTs.get(sourceTsForBucket) || [];
+  }
 
   res.json({
     since,
