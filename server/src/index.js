@@ -286,7 +286,7 @@ app.get("/api/preload-snapshots", (req, res) => {
   }
 
   const bucketCount = Math.floor((until - since) / step) + 1;
-  const MAX_BUCKETS = 2000;
+  const MAX_BUCKETS = 10000; // Allow up to ~24 hours at 15s step
   if (bucketCount > MAX_BUCKETS) {
     return res.status(400).json({
       error: "range too large",
