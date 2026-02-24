@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 
 import { AirspaceMatcher } from "./airspaceMatcher.js";
 import { fetchAtcPositions, fetchPilots } from "./collector.js";
-import { getAirportsInRange, getAirspacesInRange, getAtcSnapshotAt, getCallsingsInRange, getRangeMeta, getSnapshotAt, getTrack, insertAtcSnapshots, insertSnapshots, openDb, pruneOld, pruneOldAtc } from "./db.js";
+import { getAirportsInRange, getAirspacesInRange, getAtcSnapshotAt, getAtcSnapshotsBetween, getCallsingsInRange, getRangeMeta, getSnapshotAt, getSnapshotsBetween, getTrack, insertAtcSnapshots, insertSnapshots, openDb, pruneOld, pruneOldAtc } from "./db.js";
 
 // Define __dirname for ES modules
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
@@ -226,6 +226,70 @@ app.get("/api/atc-snapshot", (req, res) => {
   const window = parseInt(req.query.window || Math.max(5, Math.floor(POLL_INTERVAL_SECONDS / 2)).toString(), 10);
   const rows = getAtcSnapshotAt(db, ts, window);
   res.json({ ts, window, rows });
+});
+
+app.get("/api/preload-snapshots", (req, res) => {
+  const now = nowTs();
+  const since = parseInt(req.query.since || (now - 3600).toString(), 10);
+  const until = parseInt(req.query.until || now.toString(), 10);
+  const step = parseInt(req.query.step || POLL_INTERVAL_SECONDS.toString(), 10);
+  const window = parseInt(req.query.window || Math.max(5, Math.floor(POLL_INTERVAL_SECONDS / 2)).toString(), 10);
+  const airspaces = parseAirportList(
+    typeof req.query.airspaces === "string"
+      ? req.query.airspaces
+      : (typeof req.query.airspace === "string" ? req.query.airspace : "")
+  );
+  const airports = parseAirportList(
+    typeof req.query.airports === "string"
+      ? req.query.airports
+      : (typeof req.query.airport === "string" ? req.query.airport : "")
+  );
+  const minAltitude = req.query.minAltitude ? parseInt(req.query.minAltitude, 10) : null;
+  const maxAltitude = req.query.maxAltitude ? parseInt(req.query.maxAltitude, 10) : null;
+
+  if (!Number.isFinite(since) || !Number.isFinite(until) || !Number.isFinite(step) || step <= 0 || until < since) {
+    return res.status(400).json({ error: "invalid range parameters" });
+  }
+
+  const from = since - window;
+  const to = until + window;
+  const pilotRows = getSnapshotsBetween(db, from, to, airspaces, airports, minAltitude, maxAltitude);
+  const atcRows = getAtcSnapshotsBetween(db, from, to);
+
+  const timestamps = [];
+  const rowsByTs = {};
+  const atcRowsByTs = {};
+  for (let ts = since; ts <= until; ts += step) {
+    timestamps.push(ts);
+    rowsByTs[ts] = [];
+    atcRowsByTs[ts] = [];
+  }
+
+  const assignToNearestBucket = (bucketMap, row) => {
+    const nearest = since + Math.round((row.ts - since) / step) * step;
+    if (nearest < since || nearest > until) return;
+    if (Math.abs(row.ts - nearest) > window) return;
+    const key = String(nearest);
+    if (!bucketMap[key]) bucketMap[key] = [];
+    bucketMap[key].push(row);
+  };
+
+  pilotRows.forEach((row) => assignToNearestBucket(rowsByTs, row));
+  atcRows.forEach((row) => assignToNearestBucket(atcRowsByTs, row));
+
+  res.json({
+    since,
+    until,
+    step,
+    window,
+    airspaces,
+    airports,
+    minAltitude,
+    maxAltitude,
+    timestamps,
+    rowsByTs,
+    atcRowsByTs
+  });
 });
 
 const AIRSPACE_URLS = [

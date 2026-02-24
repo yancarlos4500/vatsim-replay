@@ -20,7 +20,7 @@ import {
   LinearProgress
 } from "@mui/material";
 import { createTheme, ThemeProvider } from "@mui/material/styles";
-import { getMeta, getSnapshot, getCallsigns, getTrack, getAirspace, getAtcSnapshot, getTracon, getAirspaces, getAirports } from "./api";
+import { getMeta, getCallsigns, getTrack, getAirspace, getTracon, getAirspaces, getAirports, getPreloadSnapshots } from "./api";
 import { fmt, clamp } from "./time";
 
 const panelTheme = createTheme({
@@ -529,52 +529,32 @@ useEffect(() => {
     try {
       const snapshots = new Map();
       const atcSnapshots = new Map();
-      const timestamps = [];
-      
+
       // Parse altitude filters
       const minAlt = minAltitude && minAltitude.trim() ? parseInt(minAltitude, 10) : null;
       const maxAlt = maxAltitude && maxAltitude.trim() ? parseInt(maxAltitude, 10) : null;
       const airspacesStr = selectedAirspaces.join(",");
-      
-      // Generate all timestamps in the range at the poll interval
-      for (let ts = rangeStart; ts <= rangeEnd; ts += stepSeconds) {
-        timestamps.push(ts);
-      }
-      
-      const total = timestamps.length;
-      let loaded = 0;
-      
-      // Fetch snapshots in batches of 5 to avoid overloading the server
-      const batchSize = 5;
-      for (let i = 0; i < timestamps.length; i += batchSize) {
-        const batch = timestamps.slice(i, i + batchSize);
-        
-        // Fetch both pilot and ATC snapshots in parallel for each timestamp
-        const promises = batch.map(ts =>
-          Promise.all([
-            getSnapshot(ts, airspacesStr, airportFilterText, minAlt, maxAlt)
-              .then(data => ({ ts, data: data.rows || [] }))
-              .catch(e => {
-                console.error(`Failed to load snapshot for ${ts}:`, e);
-                return { ts, data: [] };
-              }),
-            getAtcSnapshot(ts)
-              .then(data => ({ ts, data: data.rows || [] }))
-              .catch(e => {
-                console.error(`Failed to load ATC snapshot for ${ts}:`, e);
-                return { ts, data: [] };
-              })
-          ])
-        );
-        
-        const results = await Promise.all(promises);
-        results.forEach(([pilotResult, atcResult]) => {
-          snapshots.set(pilotResult.ts, pilotResult.data);
-          atcSnapshots.set(atcResult.ts, atcResult.data);
-          loaded++;
-          setPreloadProgress(Math.round((loaded / total) * 100));
-        });
-      }
+
+      const result = await getPreloadSnapshots(
+        rangeStart,
+        rangeEnd,
+        stepSeconds,
+        airspacesStr,
+        airportFilterText,
+        minAlt,
+        maxAlt
+      );
+
+      const timestamps = Array.isArray(result?.timestamps) ? result.timestamps : [];
+      const rowsByTs = result?.rowsByTs ?? {};
+      const atcRowsByTs = result?.atcRowsByTs ?? {};
+      const total = timestamps.length || 1;
+
+      timestamps.forEach((ts, index) => {
+        snapshots.set(ts, rowsByTs[String(ts)] || rowsByTs[ts] || []);
+        atcSnapshots.set(ts, atcRowsByTs[String(ts)] || atcRowsByTs[ts] || []);
+        setPreloadProgress(Math.round(((index + 1) / total) * 100));
+      });
       
       setPreloadedSnapshots(snapshots);
       setPreloadedAtcSnapshots(atcSnapshots);

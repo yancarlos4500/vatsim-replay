@@ -274,6 +274,30 @@ export function getSnapshotAt(db, ts, windowSeconds = 10, airspaces = [], airpor
   return db.prepare(sql).all(...params);
 }
 
+export function getSnapshotsBetween(db, sinceTs, untilTs, airspaces = [], airports = [], minAltitude = null, maxAltitude = null) {
+  let sql = `
+    SELECT ts, callsign, lat, lon, altitude, groundspeed, heading, airspace, departure, destination
+    FROM snapshots
+    WHERE ts BETWEEN ? AND ?
+  `;
+  const params = [sinceTs, untilTs];
+
+  const airspaceFilter = buildAirspaceFilterClause(airspaces);
+  sql += airspaceFilter.clause;
+  params.push(...airspaceFilter.params);
+
+  const airportFilter = buildAirportFilterClause(airports);
+  sql += airportFilter.clause;
+  params.push(...airportFilter.params);
+
+  const altitudeFilter = buildAltitudeFilterClause(minAltitude, maxAltitude);
+  sql += altitudeFilter.clause;
+  params.push(...altitudeFilter.params);
+
+  sql += ` ORDER BY ts ASC`;
+  return db.prepare(sql).all(...params);
+}
+
 export function getAirspacesInRange(db, sinceTs, untilTs, limit = 2000) {
   return db.prepare(`
     SELECT airspace, COUNT(*) AS points
@@ -346,4 +370,13 @@ export function getAtcSnapshotAt(db, ts, windowSeconds = 10) {
     FROM atc_snapshots
     WHERE ts BETWEEN ? AND ?
   `).all(from, to);
+}
+
+export function getAtcSnapshotsBetween(db, sinceTs, untilTs) {
+  return db.prepare(`
+    SELECT ts, callsign, frequency, facility, lat, lon
+    FROM atc_snapshots
+    WHERE ts BETWEEN ? AND ?
+    ORDER BY ts ASC
+  `).all(sinceTs, untilTs);
 }

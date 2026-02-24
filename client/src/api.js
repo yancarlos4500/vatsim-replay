@@ -86,6 +86,22 @@ export async function getAtcSnapshot(ts) {
   return r.json();
 }
 
+export async function getPreloadSnapshots(since, until, step, airspaces = "", airports = "", minAltitude = null, maxAltitude = null) {
+  const params = new URLSearchParams({
+    since: String(since),
+    until: String(until),
+    step: String(step)
+  });
+  if (airspaces) params.set("airspaces", airspaces);
+  if (airports) params.set("airports", airports);
+  if (minAltitude !== null && minAltitude >= 0) params.set("minAltitude", String(minAltitude));
+  if (maxAltitude !== null && maxAltitude >= 0) params.set("maxAltitude", String(maxAltitude));
+
+  const r = await fetch(`/api/preload-snapshots?${params.toString()}`);
+  if (!r.ok) throw new Error("preload snapshots failed");
+  return r.json();
+}
+
 export async function getTracon() {
   // Check browser cache first
   const cached = localStorage.getItem("tracon_cache");

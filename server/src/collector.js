@@ -6,6 +6,11 @@ const FETCH_RETRIES = 2;
 const RETRY_DELAY_MS = 750;
 const STALE_CACHE_MAX_AGE_MS = 30 * 60 * 1000; // 30 minutes
 
+const EMPTY_VATSIM_DATA = {
+  pilots: [],
+  controllers: []
+};
+
 let lastGoodVatsimData = null;
 let lastGoodVatsimDataAtMs = 0;
 let lastFetchFailedAtMs = 0;
@@ -43,8 +48,13 @@ async function fetchVatsimData() {
 
   if (circuitBreakerOpen) {
     const cacheAgeMs = now - lastGoodVatsimDataAtMs;
-    if (lastGoodVatsimData && cacheAgeMs <= STALE_CACHE_MAX_AGE_MS) {
-      console.warn(`[collector] circuit breaker open; using cached VATSIM data (${Math.floor(cacheAgeMs / 1000)}s old)`);
+    if (lastGoodVatsimData) {
+      const cacheAgeSeconds = Math.floor(cacheAgeMs / 1000);
+      if (cacheAgeMs <= STALE_CACHE_MAX_AGE_MS) {
+        console.warn(`[collector] circuit breaker open; using cached VATSIM data (${cacheAgeSeconds}s old)`);
+      } else {
+        console.warn(`[collector] circuit breaker open; using stale cached VATSIM data (${cacheAgeSeconds}s old)`);
+      }
       return lastGoodVatsimData;
     }
   }
@@ -69,13 +79,18 @@ async function fetchVatsimData() {
   }
 
   const cacheAgeMs = now - lastGoodVatsimDataAtMs;
-  if (lastGoodVatsimData && cacheAgeMs <= STALE_CACHE_MAX_AGE_MS) {
-    console.warn(`[collector] fetch failed; using cached VATSIM data (${Math.floor(cacheAgeMs / 1000)}s old): ${lastError?.message || lastError}`);
+  if (lastGoodVatsimData) {
+    const cacheAgeSeconds = Math.floor(cacheAgeMs / 1000);
+    if (cacheAgeMs <= STALE_CACHE_MAX_AGE_MS) {
+      console.warn(`[collector] fetch failed; using cached VATSIM data (${cacheAgeSeconds}s old): ${lastError?.message || lastError}`);
+    } else {
+      console.warn(`[collector] fetch failed; using stale cached VATSIM data (${cacheAgeSeconds}s old): ${lastError?.message || lastError}`);
+    }
     return lastGoodVatsimData;
   }
 
-  console.error(`[collector] exhausted retries and cache expired; poll cannot proceed: ${lastError?.message || lastError}`);
-  throw lastError;
+  console.error(`[collector] exhausted retries with no cache; using empty VATSIM data: ${lastError?.message || lastError}`);
+  return EMPTY_VATSIM_DATA;
 }
 
 export async function fetchPilots() {
