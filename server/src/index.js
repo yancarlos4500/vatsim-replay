@@ -309,6 +309,7 @@ app.get("/api/preload-snapshots", (req, res) => {
   const timestamps = [];
   const rowsByTs = {};
   const atcRowsByTs = {};
+  const sourceTsByBucket = {};
   for (let ts = since; ts <= until; ts += step) {
     timestamps.push(ts);
     rowsByTs[ts] = [];
@@ -355,6 +356,7 @@ app.get("/api/preload-snapshots", (req, res) => {
   for (const bucketTs of timestamps) {
     const sourceTsForBucket = bucketToSourceTs.get(bucketTs);
     if (sourceTsForBucket == null) continue;
+    sourceTsByBucket[bucketTs] = sourceTsForBucket;
     rowsByTs[bucketTs] = (pilotBySourceTs.get(sourceTsForBucket) || []).map(({ ts, ...row }) => row);
     atcRowsByTs[bucketTs] = (atcBySourceTs.get(sourceTsForBucket) || []).map(({ ts, ...row }) => row);
   }
@@ -370,6 +372,7 @@ app.get("/api/preload-snapshots", (req, res) => {
     minAltitude,
     maxAltitude,
     timestamps,
+    sourceTsByBucket,
     rowsByTs,
     atcRowsByTs
   });

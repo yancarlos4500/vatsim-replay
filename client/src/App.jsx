@@ -606,6 +606,7 @@ useEffect(() => {
       );
 
       const timestamps = Array.isArray(result?.timestamps) ? result.timestamps : [];
+      const sourceTsByBucket = result?.sourceTsByBucket ?? {};
       const rowsByTs = result?.rowsByTs ?? {};
       const atcRowsByTs = result?.atcRowsByTs ?? {};
       const total = timestamps.length || 1;
@@ -615,9 +616,24 @@ useEffect(() => {
         progressTimer = null;
       }
 
+      let lastSourceTs = null;
       timestamps.forEach((ts, index) => {
-        snapshots.set(ts, rowsByTs[String(ts)] || rowsByTs[ts] || []);
-        atcSnapshots.set(ts, atcRowsByTs[String(ts)] || atcRowsByTs[ts] || []);
+        const sourceTsForBucket = sourceTsByBucket[String(ts)] ?? sourceTsByBucket[ts] ?? null;
+        const pilotRows = rowsByTs[String(ts)] || rowsByTs[ts] || [];
+        const atcRows = atcRowsByTs[String(ts)] || atcRowsByTs[ts] || [];
+
+        if (sourceTsForBucket != null && sourceTsForBucket === lastSourceTs) {
+          const mappedProgress = 90 + Math.round(((index + 1) / total) * 10);
+          setPreloadProgress(Math.min(100, mappedProgress));
+          return;
+        }
+
+        if (pilotRows.length > 0 || atcRows.length > 0) {
+          snapshots.set(ts, pilotRows);
+          atcSnapshots.set(ts, atcRows);
+          if (sourceTsForBucket != null) lastSourceTs = sourceTsForBucket;
+        }
+
         const mappedProgress = 90 + Math.round(((index + 1) / total) * 10);
         setPreloadProgress(Math.min(100, mappedProgress));
       });
@@ -626,11 +642,7 @@ useEffect(() => {
         setPreloadProgress(100);
       }
 
-      const firstPlayableTs = timestamps.find((ts) => {
-        const pilot = rowsByTs[String(ts)] || rowsByTs[ts] || [];
-        const atc = atcRowsByTs[String(ts)] || atcRowsByTs[ts] || [];
-        return pilot.length > 0 || atc.length > 0;
-      });
+      const firstPlayableTs = Array.from(snapshots.keys())[0] ?? null;
       
       setPreloadedSnapshots(snapshots);
       setPreloadedAtcSnapshots(atcSnapshots);
