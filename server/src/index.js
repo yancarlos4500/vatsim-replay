@@ -255,6 +255,10 @@ app.get("/api/preload-snapshots", (req, res) => {
   const until = parseInt(req.query.until || now.toString(), 10);
   const step = parseInt(req.query.step || POLL_INTERVAL_SECONDS.toString(), 10);
   const window = parseInt(req.query.window || Math.max(5, Math.floor(POLL_INTERVAL_SECONDS / 2)).toString(), 10);
+  const maxSourceAge = parseInt(
+    req.query.maxSourceAge || Math.max(window, step * 2, POLL_INTERVAL_SECONDS * 2).toString(),
+    10
+  );
   const airspaces = parseAirportList(
     typeof req.query.airspaces === "string"
       ? req.query.airspaces
@@ -280,6 +284,9 @@ app.get("/api/preload-snapshots", (req, res) => {
   }
   if (step <= 0) {
     return res.status(400).json({ error: "step must be positive", received: step });
+  }
+  if (!Number.isFinite(maxSourceAge) || maxSourceAge <= 0) {
+    return res.status(400).json({ error: "maxSourceAge must be positive", received: req.query.maxSourceAge, parsed: maxSourceAge });
   }
   if (until < since) {
     return res.status(400).json({ error: "until must be >= since", since, until });
@@ -323,7 +330,7 @@ app.get("/api/preload-snapshots", (req, res) => {
         nearest = right;
       }
 
-      if (Math.abs(nearest - bucketTs) <= window) {
+      if (Math.abs(nearest - bucketTs) <= maxSourceAge) {
         bucketToSourceTs.set(bucketTs, nearest);
       }
     }
@@ -357,6 +364,7 @@ app.get("/api/preload-snapshots", (req, res) => {
     until,
     step,
     window,
+    maxSourceAge,
     airspaces,
     airports,
     minAltitude,
