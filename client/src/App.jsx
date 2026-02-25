@@ -355,6 +355,26 @@ export default function App() {
   const stepSeconds = meta?.pollIntervalSeconds ?? 15;
   const sliderStepSeconds = 15;
 
+  const playableTimestamps = useMemo(() => {
+    if (preloadedSnapshots.size === 0 && preloadedAtcSnapshots.size === 0) {
+      return [];
+    }
+
+    const all = new Set([
+      ...Array.from(preloadedSnapshots.keys()),
+      ...Array.from(preloadedAtcSnapshots.keys())
+    ]);
+
+    return Array.from(all)
+      .sort((a, b) => a - b)
+      .filter((ts) => {
+        const pilotRows = preloadedSnapshots.get(ts);
+        const atcRows = preloadedAtcSnapshots.get(ts);
+        return (Array.isArray(pilotRows) && pilotRows.length > 0)
+          || (Array.isArray(atcRows) && atcRows.length > 0);
+      });
+  }, [preloadedSnapshots, preloadedAtcSnapshots]);
+
   const { tracon: atcOnlineTracon, airspace: atcOnlineAirspace } = useMemo(
     () => buildAtcOnlineSets(atcSnapshot),
     [atcSnapshot]
@@ -605,10 +625,16 @@ useEffect(() => {
       if (timestamps.length === 0) {
         setPreloadProgress(100);
       }
+
+      const firstPlayableTs = timestamps.find((ts) => {
+        const pilot = rowsByTs[String(ts)] || rowsByTs[ts] || [];
+        const atc = atcRowsByTs[String(ts)] || atcRowsByTs[ts] || [];
+        return pilot.length > 0 || atc.length > 0;
+      });
       
       setPreloadedSnapshots(snapshots);
       setPreloadedAtcSnapshots(atcSnapshots);
-      setT(rangeStart); // Jump to start of range
+      setT(firstPlayableTs ?? rangeStart); // Jump to first playable point (or range start)
       setPlaying(true); // Auto-start playback
     } catch (e) {
       console.error("Failed to preload snapshots:", e);
@@ -666,14 +692,33 @@ useEffect(() => {
 // Playback: advance by one stored step each "update", at updatesPerSecond rate
 useInterval(() => {
   if (rangeStart == null || rangeEnd == null) return;
+  if (playableTimestamps.length > 0) {
+    setT((prev) => {
+      const current = prev ?? rangeStart;
+      const nextPlayable = playableTimestamps.find((ts) => ts > current && ts >= rangeStart && ts <= rangeEnd);
+      return nextPlayable ?? current;
+    });
+    return;
+  }
+
   setT(prev => clamp((prev ?? rangeStart) + stepSeconds, rangeStart, rangeEnd));
 }, updatesPerSecond > 0 ? (1000 / updatesPerSecond) : 1000, playing);
 
 // Auto-stop at end of selected range
 useEffect(() => {
   if (!bounds || t == null || rangeEnd == null) return;
+  if (playableTimestamps.length > 0) {
+    const lastPlayableInRange = playableTimestamps
+      .filter((ts) => ts >= (rangeStart ?? bounds.min) && ts <= rangeEnd)
+      .at(-1);
+    if (lastPlayableInRange != null && t >= lastPlayableInRange && playing) {
+      setPlaying(false);
+    }
+    return;
+  }
+
   if (t >= rangeEnd && playing) setPlaying(false);
-}, [t, bounds, playing, rangeEnd]);
+}, [t, bounds, playing, rangeEnd, rangeStart, playableTimestamps]);
 
 
   const center = useMemo(() => {
