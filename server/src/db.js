@@ -26,6 +26,32 @@ function ensureSnapshotColumns(db) {
   }
 }
 
+function ensureEventColumns(db) {
+  const columns = db.prepare(`PRAGMA table_info(events)`).all();
+  const names = new Set(columns.map((c) => c.name));
+
+  if (!names.has("start_ts")) {
+    db.exec(`ALTER TABLE events ADD COLUMN start_ts INTEGER`);
+  }
+  if (!names.has("end_ts")) {
+    db.exec(`ALTER TABLE events ADD COLUMN end_ts INTEGER`);
+  }
+
+  db.exec(`
+    UPDATE events
+    SET
+      start_ts = CASE
+        WHEN start_time IS NOT NULL AND start_time <> '' THEN CAST(strftime('%s', start_time) AS INTEGER)
+        ELSE NULL
+      END,
+      end_ts = CASE
+        WHEN end_time IS NOT NULL AND end_time <> '' THEN CAST(strftime('%s', end_time) AS INTEGER)
+        ELSE NULL
+      END
+    WHERE start_ts IS NULL OR end_ts IS NULL
+  `);
+}
+
 function buildAirportFilterClause(airports, departureColumn = "departure", destinationColumn = "destination") {
   const list = Array.isArray(airports)
     ? airports.filter((code) => typeof code === "string" && code.trim().length > 0)
@@ -113,15 +139,140 @@ export function openDb(dbPath) {
     );
     CREATE INDEX IF NOT EXISTS idx_atc_snapshots_ts ON atc_snapshots(ts);
     CREATE INDEX IF NOT EXISTS idx_atc_snapshots_callsign_ts ON atc_snapshots(callsign, ts);
+
+    CREATE TABLE IF NOT EXISTS events (
+      id INTEGER PRIMARY KEY,
+      type TEXT,
+      name TEXT NOT NULL,
+      link TEXT,
+      start_time TEXT NOT NULL,
+      end_time TEXT NOT NULL,
+      start_ts INTEGER,
+      end_ts INTEGER,
+      short_description TEXT,
+      description TEXT,
+      banner TEXT,
+      organisers_json TEXT,
+      airports_json TEXT,
+      routes_json TEXT,
+      last_seen_ts INTEGER NOT NULL,
+      created_ts INTEGER NOT NULL,
+      updated_ts INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_events_start_time ON events(start_time);
+    CREATE INDEX IF NOT EXISTS idx_events_end_time ON events(end_time);
+    CREATE INDEX IF NOT EXISTS idx_events_last_seen_ts ON events(last_seen_ts);
   `);
   ensureSnapshotColumns(db);
+  ensureEventColumns(db);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_snapshots_airspace_ts ON snapshots(airspace, ts);`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_snapshots_departure_ts ON snapshots(departure, ts);`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_snapshots_destination_ts ON snapshots(destination, ts);`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_snapshots_ts_airspace ON snapshots(ts, airspace);`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_snapshots_ts_departure ON snapshots(ts, departure);`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_snapshots_ts_destination ON snapshots(ts, destination);`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_events_start_ts ON events(start_ts);`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_events_end_ts ON events(end_ts);`);
   return db;
+}
+
+export function upsertEvents(db, events, seenTs) {
+  if (!Array.isArray(events) || events.length === 0) return 0;
+
+  const stmt = db.prepare(`
+    INSERT INTO events (
+      id,
+      type,
+      name,
+      link,
+      start_time,
+      end_time,
+      start_ts,
+      end_ts,
+      short_description,
+      description,
+      banner,
+      organisers_json,
+      airports_json,
+      routes_json,
+      last_seen_ts,
+      created_ts,
+      updated_ts
+    ) VALUES (
+      @id,
+      @type,
+      @name,
+      @link,
+      @start_time,
+      @end_time,
+      @start_ts,
+      @end_ts,
+      @short_description,
+      @description,
+      @banner,
+      @organisers_json,
+      @airports_json,
+      @routes_json,
+      @last_seen_ts,
+      @created_ts,
+      @updated_ts
+    )
+    ON CONFLICT(id) DO UPDATE SET
+      type = excluded.type,
+      name = excluded.name,
+      link = excluded.link,
+      start_time = excluded.start_time,
+      end_time = excluded.end_time,
+      start_ts = excluded.start_ts,
+      end_ts = excluded.end_ts,
+      short_description = excluded.short_description,
+      description = excluded.description,
+      banner = excluded.banner,
+      organisers_json = excluded.organisers_json,
+      airports_json = excluded.airports_json,
+      routes_json = excluded.routes_json,
+      last_seen_ts = excluded.last_seen_ts,
+      updated_ts = excluded.updated_ts
+  `);
+
+  const run = db.transaction((rows) => {
+    for (const e of rows) {
+      if (!Number.isFinite(e?.id)) continue;
+      if (typeof e?.name !== "string" || e.name.trim().length === 0) continue;
+      if (!e?.start_time || !e?.end_time) continue;
+
+      const startTs = Number.isFinite(Date.parse(e.start_time))
+        ? Math.floor(Date.parse(e.start_time) / 1000)
+        : null;
+      const endTs = Number.isFinite(Date.parse(e.end_time))
+        ? Math.floor(Date.parse(e.end_time) / 1000)
+        : null;
+
+      stmt.run({
+        id: e.id,
+        type: e.type ?? null,
+        name: e.name,
+        link: e.link ?? null,
+        start_time: e.start_time,
+        end_time: e.end_time,
+        start_ts: startTs,
+        end_ts: endTs,
+        short_description: e.short_description ?? null,
+        description: e.description ?? null,
+        banner: e.banner ?? null,
+        organisers_json: JSON.stringify(Array.isArray(e.organisers) ? e.organisers : []),
+        airports_json: JSON.stringify(Array.isArray(e.airports) ? e.airports : []),
+        routes_json: JSON.stringify(Array.isArray(e.routes) ? e.routes : []),
+        last_seen_ts: seenTs,
+        created_ts: seenTs,
+        updated_ts: seenTs
+      });
+    }
+  });
+
+  const before = db.totalChanges;
+  run(events);
+  return db.totalChanges - before;
 }
 
 export function insertSnapshots(db, ts, pilots) {
@@ -150,7 +301,18 @@ export function insertSnapshots(db, ts, pilots) {
 }
 
 export function pruneOld(db, cutoffTs) {
-  const info = db.prepare(`DELETE FROM snapshots WHERE ts < ?`).run(cutoffTs);
+  const info = db.prepare(`
+    DELETE FROM snapshots
+    WHERE ts < ?
+      AND NOT EXISTS (
+        SELECT 1
+        FROM events e
+        WHERE e.start_ts IS NOT NULL
+          AND e.end_ts IS NOT NULL
+          AND e.start_ts <= e.end_ts
+          AND snapshots.ts BETWEEN e.start_ts AND e.end_ts
+      )
+  `).run(cutoffTs);
   return info.changes ?? 0;
 }
 
@@ -377,6 +539,86 @@ export function getRangeMeta(db) {
   return row ?? { minTs: null, maxTs: null, rows: 0 };
 }
 
+export function getStoredEvents(db, fromIso = null, toIso = null, limit = 200, onlyWithData = true) {
+  const params = [];
+  let where = "WHERE 1=1";
+
+  if (typeof fromIso === "string" && fromIso.trim().length > 0) {
+    where += " AND end_time >= ?";
+    params.push(fromIso.trim());
+  }
+  if (typeof toIso === "string" && toIso.trim().length > 0) {
+    where += " AND start_time <= ?";
+    params.push(toIso.trim());
+  }
+
+  if (onlyWithData) {
+    where += `
+      AND (
+        EXISTS (
+          SELECT 1 FROM snapshots s
+          WHERE events.start_ts IS NOT NULL
+            AND events.end_ts IS NOT NULL
+            AND events.start_ts <= events.end_ts
+            AND s.ts BETWEEN events.start_ts AND events.end_ts
+          LIMIT 1
+        )
+        OR EXISTS (
+          SELECT 1 FROM atc_snapshots a
+          WHERE events.start_ts IS NOT NULL
+            AND events.end_ts IS NOT NULL
+            AND events.start_ts <= events.end_ts
+            AND a.ts BETWEEN events.start_ts AND events.end_ts
+          LIMIT 1
+        )
+      )
+    `;
+  }
+
+  const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(2000, limit)) : 200;
+  params.push(safeLimit);
+
+  const rows = db.prepare(`
+    SELECT
+      id,
+      type,
+      name,
+      link,
+      start_time,
+      end_time,
+      short_description,
+      description,
+      banner,
+      organisers_json,
+      airports_json,
+      routes_json,
+      last_seen_ts,
+      created_ts,
+      updated_ts
+    FROM events
+    ${where}
+    ORDER BY start_time DESC
+    LIMIT ?
+  `).all(...params);
+
+  return rows.map((row) => ({
+    ...row,
+    organisers: safeJsonParseArray(row.organisers_json),
+    airports: safeJsonParseArray(row.airports_json),
+    routes: safeJsonParseArray(row.routes_json)
+  }));
+}
+
+function safeJsonParseArray(value) {
+  if (typeof value !== "string" || value.trim().length === 0) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 export function insertAtcSnapshots(db, ts, atcPositions) {
   const stmt = db.prepare(`
     INSERT INTO atc_snapshots (ts, callsign, cid, frequency, facility, lat, lon)
@@ -399,7 +641,18 @@ export function insertAtcSnapshots(db, ts, atcPositions) {
 }
 
 export function pruneOldAtc(db, cutoffTs) {
-  const info = db.prepare(`DELETE FROM atc_snapshots WHERE ts < ?`).run(cutoffTs);
+  const info = db.prepare(`
+    DELETE FROM atc_snapshots
+    WHERE ts < ?
+      AND NOT EXISTS (
+        SELECT 1
+        FROM events e
+        WHERE e.start_ts IS NOT NULL
+          AND e.end_ts IS NOT NULL
+          AND e.start_ts <= e.end_ts
+          AND atc_snapshots.ts BETWEEN e.start_ts AND e.end_ts
+      )
+  `).run(cutoffTs);
   return info.changes ?? 0;
 }
 

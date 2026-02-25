@@ -20,7 +20,7 @@ import {
   LinearProgress
 } from "@mui/material";
 import { createTheme, ThemeProvider } from "@mui/material/styles";
-import { getMeta, getCallsigns, getTrack, getAirspace, getTracon, getAirspaces, getAirports, getPreloadSnapshots } from "./api";
+import { getMeta, getCallsigns, getTrack, getAirspace, getTracon, getAirspaces, getAirports, getEvents, getPreloadSnapshots } from "./api";
 import { fmt, clamp } from "./time";
 
 const panelTheme = createTheme({
@@ -333,6 +333,8 @@ export default function App() {
   const [airspaceOptions, setAirspaceOptions] = useState([]);
   const [airportFilterText, setAirportFilterText] = useState("");
   const [airportOptions, setAirportOptions] = useState([]);
+  const [eventOptions, setEventOptions] = useState([]);
+  const [selectedEventId, setSelectedEventId] = useState("");
   const [minAltitude, setMinAltitude] = useState("");
   const [maxAltitude, setMaxAltitude] = useState("");
   const [rangeStart, setRangeStart] = useState(null);
@@ -553,6 +555,40 @@ useEffect(() => {
     setAirportOptions(unique);
   }
 
+  async function refreshEvents(forceRefresh = false) {
+    const r = await getEvents(1000, forceRefresh);
+    setEventOptions(Array.isArray(r?.rows) ? r.rows : []);
+  }
+
+  function applySelectedEvent() {
+    if (!selectedEventId) return;
+    const selected = eventOptions.find((e) => String(e.id) === String(selectedEventId));
+    if (!selected) return;
+
+    const airports = Array.isArray(selected.airports)
+      ? selected.airports
+          .map((a) => (typeof a?.icao === "string" ? a.icao.trim().toUpperCase() : ""))
+          .filter(Boolean)
+      : [];
+
+    if (airports.length > 0) {
+      setAirportFilterText(Array.from(new Set(airports)).join(","));
+    }
+
+    const eventStartTs = Math.floor(Date.parse(selected.start_time) / 1000);
+    const eventEndTs = Math.floor(Date.parse(selected.end_time) / 1000);
+    if (bounds && Number.isFinite(eventStartTs) && Number.isFinite(eventEndTs)) {
+      const clampedStart = clamp(eventStartTs, bounds.min, bounds.max);
+      const clampedEnd = clamp(eventEndTs, bounds.min, bounds.max);
+      const finalStart = Math.min(clampedStart, clampedEnd);
+      const finalEnd = Math.max(clampedStart, clampedEnd);
+      setRangeStart(finalStart);
+      setRangeEnd(finalEnd);
+      setT(finalStart);
+      setPlaying(false);
+    }
+  }
+
   async function loadSnapshotsForRange() {
     // Use explicit null check instead of falsy check to allow timestamp 0
     if (rangeStart == null || rangeEnd == null) {
@@ -688,12 +724,24 @@ useEffect(() => {
   }, [bounds, debouncedRangeStart, debouncedRangeEnd]);
 
   useEffect(() => {
+    refreshEvents(false).catch(console.error);
+  }, []);
+
+  useEffect(() => {
     // Remove any selected airspaces that are no longer in options
     const validAirspaces = selectedAirspaces.filter(a => airspaceOptions.includes(a));
     if (validAirspaces.length !== selectedAirspaces.length) {
       setSelectedAirspaces(validAirspaces);
     }
   }, [selectedAirspaces, airspaceOptions]);
+
+  useEffect(() => {
+    if (!selectedEventId) return;
+    const exists = eventOptions.some((e) => String(e.id) === String(selectedEventId));
+    if (!exists) {
+      setSelectedEventId("");
+    }
+  }, [eventOptions, selectedEventId]);
 
   // Clear preloaded snapshots when filters change
   useEffect(() => {
@@ -1085,6 +1133,36 @@ useEffect(() => {
               <MenuItem value="track">Track callsign</MenuItem>
             </Select>
           </FormControl>
+
+          <FormControl fullWidth size="small" sx={{ mb: 1 }}>
+            <InputLabel>Replay event</InputLabel>
+            <Select
+              label="Replay event"
+              value={selectedEventId}
+              onChange={(e) => setSelectedEventId(e.target.value)}
+              renderValue={(value) => {
+                if (!value) return "None";
+                const selected = eventOptions.find((row) => String(row.id) === String(value));
+                return selected ? `${selected.name} (${selected.start_time?.slice?.(0, 10) || "n/a"})` : "None";
+              }}
+            >
+              <MenuItem value="">None</MenuItem>
+              {eventOptions.map((row) => (
+                <MenuItem key={row.id} value={String(row.id)}>
+                  {row.name} ({row.start_time?.slice?.(0, 16)?.replace("T", " ") || "n/a"}Z)
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+
+          <Stack direction="row" spacing={1} sx={{ mb: 1 }}>
+            <Button fullWidth size="small" variant="outlined" onClick={applySelectedEvent} disabled={!selectedEventId || !bounds}>
+              Apply Event
+            </Button>
+            <Button fullWidth size="small" variant="outlined" onClick={() => refreshEvents(true).catch(console.error)}>
+              Refresh Events
+            </Button>
+          </Stack>
 
           <FormControl fullWidth size="small" sx={{ mb: 1 }}>
             <InputLabel>Replay airspace(s)</InputLabel>

@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 
 import { AirspaceMatcher } from "./airspaceMatcher.js";
 import { fetchAtcPositions, fetchPilots } from "./collector.js";
-import { getAirportsInRange, getAirspacesInRange, getAtcSnapshotAt, getAtcSnapshotsAtTimestamps, getCallsingsInRange, getRangeMeta, getSnapshotAt, getSnapshotTimestampsInRange, getSnapshotsAtTimestamps, getTrack, insertAtcSnapshots, insertSnapshots, openDb, pruneOld, pruneOldAtc } from "./db.js";
+import { getAirportsInRange, getAirspacesInRange, getAtcSnapshotAt, getAtcSnapshotsAtTimestamps, getCallsingsInRange, getRangeMeta, getSnapshotAt, getSnapshotTimestampsInRange, getSnapshotsAtTimestamps, getStoredEvents, getTrack, insertAtcSnapshots, insertSnapshots, openDb, pruneOld, pruneOldAtc, upsertEvents } from "./db.js";
 
 // Define __dirname for ES modules
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
@@ -19,6 +19,9 @@ dotenv.config();
 const PORT = parseInt(process.env.PORT || "4000", 10);
 const POLL_INTERVAL_SECONDS = parseInt(process.env.POLL_INTERVAL_SECONDS || "15", 10);
 const RETENTION_HOURS = parseInt(process.env.RETENTION_HOURS || "24", 10);
+const EVENTS_LATEST_NUM = parseInt(process.env.EVENTS_LATEST_NUM || "150", 10);
+const EVENT_POLL_INTERVAL_SECONDS = parseInt(process.env.EVENT_POLL_INTERVAL_SECONDS || "3600", 10);
+const EVENTS_API_BASE = process.env.EVENTS_API_BASE || "https://my.vatsim.net/api/v2/events/latest";
 function resolveDbPath() {
   if (process.env.DB_PATH && process.env.DB_PATH.trim().length > 0) {
     const configured = process.env.DB_PATH.trim();
@@ -87,6 +90,39 @@ async function pollOnce() {
 
 let pollTimer = null;
 let pollInProgress = false;
+let lastEventsSyncTs = 0;
+
+async function syncEventsOnce(force = false) {
+  const ts = nowTs();
+  if (!force && ts - lastEventsSyncTs < EVENT_POLL_INTERVAL_SECONDS) {
+    return 0;
+  }
+
+  const safeNum = Number.isFinite(EVENTS_LATEST_NUM) ? Math.max(1, Math.min(500, EVENTS_LATEST_NUM)) : 150;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
+
+  try {
+    const url = `${EVENTS_API_BASE}/${safeNum}`;
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: { "User-Agent": "vatsim-traffic-replay/1.0 (+https://example.local)" }
+    });
+
+    if (!response.ok) {
+      throw new Error(`events api ${response.status}`);
+    }
+
+    const body = await response.json();
+    const items = Array.isArray(body?.data) ? body.data : [];
+    const changes = upsertEvents(db, items, ts);
+    lastEventsSyncTs = ts;
+    console.log(`[events] fetched=${items.length} upserted=${changes} latestNum=${safeNum}`);
+    return items.length;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 async function warmupGeoJsonCaches() {
   // Pre-warm airspace cache in background
@@ -121,6 +157,9 @@ async function startCollector() {
     pollInProgress = true;
     try {
       await pollOnce();
+      syncEventsOnce(false).catch((e) => {
+        console.warn("[events] periodic sync failed:", e?.message || e);
+      });
     } catch (e) {
       if (e?.type !== "aborted") {
         console.error("[collector] poll failed:", e?.message || e);
@@ -142,6 +181,24 @@ app.get("/api/meta", (req, res) => {
     pollIntervalSeconds: POLL_INTERVAL_SECONDS,
     nowTs: nowTs()
   });
+});
+
+app.get("/api/events", async (req, res) => {
+  try {
+    const refresh = req.query.refresh === "1" || req.query.refresh === "true";
+    if (refresh) {
+      await syncEventsOnce(true);
+    }
+
+    const from = typeof req.query.from === "string" ? req.query.from : null;
+    const to = typeof req.query.to === "string" ? req.query.to : null;
+    const limit = parseInt(req.query.limit || "500", 10);
+    const includeWithoutData = req.query.includeWithoutData === "1" || req.query.includeWithoutData === "true";
+    const rows = getStoredEvents(db, from, to, limit, !includeWithoutData);
+    res.json({ from, to, limit, includeWithoutData, rows });
+  } catch (e) {
+    res.status(500).json({ error: "events query failed", message: String(e?.message || e) });
+  }
 });
 
 app.get("/api/callsigns", (req, res) => {
@@ -637,5 +694,8 @@ atcCache = { ts: 0, positions: [] };
 
 app.listen(PORT, () => {
   console.log(`Server listening on http://localhost:${PORT}`);
+  syncEventsOnce(true).catch((e) => {
+    console.warn("[events] startup sync failed:", e?.message || e);
+  });
   startCollector(); // Non-blocking; polls run in background
 });

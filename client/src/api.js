@@ -109,6 +109,14 @@ export async function getPreloadSnapshots(since, until, step, airspaces = "", ai
   return r.json();
 }
 
+export async function getEvents(limit = 500, refresh = false) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (refresh) params.set("refresh", "1");
+  const r = await fetch(`/api/events?${params.toString()}`);
+  if (!r.ok) throw new Error("events failed");
+  return r.json();
+}
+
 export async function getTracon() {
   // Check browser cache first
   const cached = localStorage.getItem("tracon_cache");
