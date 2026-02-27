@@ -19,6 +19,7 @@ dotenv.config();
 const PORT = parseInt(process.env.PORT || "4000", 10);
 const POLL_INTERVAL_SECONDS = parseInt(process.env.POLL_INTERVAL_SECONDS || "15", 10);
 const RETENTION_HOURS = parseInt(process.env.RETENTION_HOURS || "24", 10);
+const MAX_REPLAY_RANGE_SECONDS = 24 * 3600;
 const EVENTS_LATEST_NUM = parseInt(process.env.EVENTS_LATEST_NUM || "150", 10);
 const EVENT_POLL_INTERVAL_SECONDS = parseInt(process.env.EVENT_POLL_INTERVAL_SECONDS || "3600", 10);
 const EVENTS_API_BASE = process.env.EVENTS_API_BASE || "https://my.vatsim.net/api/v2/events/latest";
@@ -63,6 +64,26 @@ function parseAirportList(rawValue) {
       .map((x) => x.trim().toUpperCase())
       .filter((x) => x.length > 0)
   ));
+}
+
+function validateReplayRange(since, until) {
+  if (until < since) {
+    return { ok: false, error: "until must be >= since", since, until };
+  }
+
+  const replayRangeSeconds = until - since;
+  if (replayRangeSeconds > MAX_REPLAY_RANGE_SECONDS) {
+    return {
+      ok: false,
+      error: "replay range exceeds 24 hours",
+      maxRangeSeconds: MAX_REPLAY_RANGE_SECONDS,
+      replayRangeSeconds,
+      since,
+      until
+    };
+  }
+
+  return { ok: true };
 }
 
 async function pollOnce() {
@@ -205,6 +226,10 @@ app.get("/api/callsigns", (req, res) => {
   const now = nowTs();
   const since = parseInt(req.query.since || (now - 3600).toString(), 10);
   const until = parseInt(req.query.until || now.toString(), 10);
+  const validation = validateReplayRange(since, until);
+  if (!validation.ok) {
+    return res.status(400).json(validation);
+  }
   const limit = parseInt(req.query.limit || "2000", 10);
   const airspaces = parseAirportList(
     typeof req.query.airspaces === "string"
@@ -227,6 +252,10 @@ app.get("/api/track/:callsign", (req, res) => {
   const callsign = req.params.callsign.toUpperCase();
   const since = parseInt(req.query.since || (now - 3600).toString(), 10);
   const until = parseInt(req.query.until || now.toString(), 10);
+  const validation = validateReplayRange(since, until);
+  if (!validation.ok) {
+    return res.status(400).json(validation);
+  }
   const step = parseInt(req.query.step || "0", 10);
   const airspaces = parseAirportList(
     typeof req.query.airspaces === "string"
@@ -268,6 +297,10 @@ app.get("/api/airspaces", (req, res) => {
   const now = nowTs();
   const since = parseInt(req.query.since || (now - 3600).toString(), 10);
   const until = parseInt(req.query.until || now.toString(), 10);
+  const validation = validateReplayRange(since, until);
+  if (!validation.ok) {
+    return res.status(400).json(validation);
+  }
   const limit = parseInt(req.query.limit || "2000", 10);
   
   const cached = getCached("airspaces", since, until, limit);
@@ -285,6 +318,10 @@ app.get("/api/airports", (req, res) => {
   const now = nowTs();
   const since = parseInt(req.query.since || (now - 3600).toString(), 10);
   const until = parseInt(req.query.until || now.toString(), 10);
+  const validation = validateReplayRange(since, until);
+  if (!validation.ok) {
+    return res.status(400).json(validation);
+  }
   const limit = parseInt(req.query.limit || "3000", 10);
   
   const cached = getCached("airports", since, until, limit);
@@ -347,6 +384,17 @@ app.get("/api/preload-snapshots", (req, res) => {
   }
   if (until < since) {
     return res.status(400).json({ error: "until must be >= since", since, until });
+  }
+
+  const replayRangeSeconds = until - since;
+  if (replayRangeSeconds > MAX_REPLAY_RANGE_SECONDS) {
+    return res.status(400).json({
+      error: "replay range exceeds 24 hours",
+      maxRangeSeconds: MAX_REPLAY_RANGE_SECONDS,
+      replayRangeSeconds,
+      since,
+      until
+    });
   }
 
   const bucketCount = Math.floor((until - since) / step) + 1;

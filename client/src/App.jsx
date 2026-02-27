@@ -306,6 +306,7 @@ function buildAtcOnlineSets(rows) {
 }
 
 export default function App() {
+  const MAX_REPLAY_SECONDS = 24 * 3600;
   const [meta, setMeta] = useState(null);
   const [mode, setMode] = useState("all"); // all | track
   const [loading, setLoading] = useState(false);
@@ -354,6 +355,32 @@ export default function App() {
     return { min: meta.minTs, max: meta.maxTs };
   }, [meta]);
 
+  const selectedEventWindow = useMemo(() => {
+    if (!selectedEventId || !bounds) return null;
+    const selected = eventOptions.find((e) => String(e.id) === String(selectedEventId));
+    if (!selected) return null;
+    const eventStartTs = Math.floor(Date.parse(selected.start_time) / 1000);
+    const eventEndTs = Math.floor(Date.parse(selected.end_time) / 1000);
+    if (!Number.isFinite(eventStartTs) || !Number.isFinite(eventEndTs)) return null;
+
+    const clampedStart = clamp(eventStartTs, bounds.min, bounds.max);
+    const clampedEnd = clamp(eventEndTs, bounds.min, bounds.max);
+    return {
+      start: Math.min(clampedStart, clampedEnd),
+      end: Math.max(clampedStart, clampedEnd)
+    };
+  }, [selectedEventId, eventOptions, bounds]);
+
+  const allowedRangeBounds = useMemo(() => {
+    if (!bounds) return null;
+    if (!selectedEventWindow) return { min: bounds.min, max: bounds.max };
+
+    return {
+      min: Math.max(bounds.min, selectedEventWindow.start),
+      max: Math.min(bounds.max, selectedEventWindow.end)
+    };
+  }, [bounds, selectedEventWindow]);
+
   const stepSeconds = meta?.pollIntervalSeconds ?? 15;
   const sliderStepSeconds = 15;
 
@@ -397,6 +424,31 @@ useEffect(() => {
 
   return () => clearTimeout(id);
 }, [rangeStart, rangeEnd]);
+
+useEffect(() => {
+  if (!allowedRangeBounds || rangeStart == null || rangeEnd == null) return;
+
+  const minAllowed = allowedRangeBounds.min;
+  const maxAllowed = allowedRangeBounds.max;
+  if (!Number.isFinite(minAllowed) || !Number.isFinite(maxAllowed)) return;
+
+  let nextStart = clamp(rangeStart, minAllowed, maxAllowed);
+  let nextEnd = clamp(rangeEnd, minAllowed, maxAllowed);
+
+  if (nextStart > nextEnd) {
+    const tmp = nextStart;
+    nextStart = nextEnd;
+    nextEnd = tmp;
+  }
+
+  if ((nextEnd - nextStart) > MAX_REPLAY_SECONDS) {
+    nextEnd = Math.min(maxAllowed, nextStart + MAX_REPLAY_SECONDS);
+    nextStart = Math.max(minAllowed, nextEnd - MAX_REPLAY_SECONDS);
+  }
+
+  if (nextStart !== rangeStart) setRangeStart(nextStart);
+  if (nextEnd !== rangeEnd) setRangeEnd(nextEnd);
+}, [allowedRangeBounds, rangeStart, rangeEnd, MAX_REPLAY_SECONDS]);
 
 
 
@@ -575,13 +627,9 @@ useEffect(() => {
       setAirportFilterText(Array.from(new Set(airports)).join(","));
     }
 
-    const eventStartTs = Math.floor(Date.parse(selected.start_time) / 1000);
-    const eventEndTs = Math.floor(Date.parse(selected.end_time) / 1000);
-    if (bounds && Number.isFinite(eventStartTs) && Number.isFinite(eventEndTs)) {
-      const clampedStart = clamp(eventStartTs, bounds.min, bounds.max);
-      const clampedEnd = clamp(eventEndTs, bounds.min, bounds.max);
-      const finalStart = Math.min(clampedStart, clampedEnd);
-      const finalEnd = Math.max(clampedStart, clampedEnd);
+    if (selectedEventWindow) {
+      const finalStart = selectedEventWindow.start;
+      const finalEnd = Math.min(selectedEventWindow.end, finalStart + MAX_REPLAY_SECONDS);
       setRangeStart(finalStart);
       setRangeEnd(finalEnd);
       setT(finalStart);
@@ -1104,8 +1152,11 @@ useEffect(() => {
           <Typography variant="caption" sx={{ opacity: 1, color: "text.secondary" }}>Start</Typography>
           <Slider
             value={rangeStart ?? (bounds?.min ?? 0)}
-            min={bounds?.min ?? 0}
-            max={bounds?.max ?? 0}
+            min={allowedRangeBounds?.min ?? (bounds?.min ?? 0)}
+            max={Math.max(
+              allowedRangeBounds?.min ?? (bounds?.min ?? 0),
+              Math.min(rangeEnd ?? (allowedRangeBounds?.max ?? (bounds?.max ?? 0)), allowedRangeBounds?.max ?? (bounds?.max ?? 0))
+            )}
             step={sliderStepSeconds}
             onChange={(_, value) => setRangeStart(Array.isArray(value) ? value[0] : value)}
             disabled={!bounds}
@@ -1114,14 +1165,32 @@ useEffect(() => {
           <Typography variant="caption" sx={{ opacity: 1, color: "text.secondary" }}>End</Typography>
           <Slider
             value={rangeEnd ?? (bounds?.max ?? 0)}
-            min={bounds?.min ?? 0}
-            max={bounds?.max ?? 0}
+            min={Math.min(
+              allowedRangeBounds?.max ?? (bounds?.max ?? 0),
+              Math.max(rangeStart ?? (allowedRangeBounds?.min ?? (bounds?.min ?? 0)), allowedRangeBounds?.min ?? (bounds?.min ?? 0))
+            )}
+            max={allowedRangeBounds?.max ?? (bounds?.max ?? 0)}
             step={sliderStepSeconds}
             onChange={(_, value) => setRangeEnd(Array.isArray(value) ? value[0] : value)}
             disabled={!bounds}
           />
 
-          <Button fullWidth size="small" variant="outlined" onClick={() => bounds && (setRangeStart(bounds.min), setRangeEnd(bounds.max), setT(bounds.max))} disabled={!bounds}>Full Range</Button>
+          <Button
+            fullWidth
+            size="small"
+            variant="outlined"
+            onClick={() => {
+              if (!allowedRangeBounds) return;
+              const end = allowedRangeBounds.max;
+              const start = Math.max(allowedRangeBounds.min, end - MAX_REPLAY_SECONDS);
+              setRangeStart(start);
+              setRangeEnd(end);
+              setT(end);
+            }}
+            disabled={!bounds}
+          >
+            Full Range
+          </Button>
         </Paper>
 
         <Paper variant="outlined" sx={{ p: 1.25, bgcolor: "rgba(255,255,255,0.03)" }}>
