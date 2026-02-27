@@ -18,7 +18,7 @@ dotenv.config();
 
 const PORT = parseInt(process.env.PORT || "4000", 10);
 const POLL_INTERVAL_SECONDS = parseInt(process.env.POLL_INTERVAL_SECONDS || "15", 10);
-const RETENTION_HOURS = parseInt(process.env.RETENTION_HOURS || "24", 10);
+const RETENTION_HOURS = parseInt(process.env.RETENTION_HOURS || "720", 10);
 const MAX_REPLAY_RANGE_SECONDS = 24 * 3600;
 const EVENTS_LATEST_NUM = parseInt(process.env.EVENTS_LATEST_NUM || "150", 10);
 const EVENT_POLL_INTERVAL_SECONDS = parseInt(process.env.EVENT_POLL_INTERVAL_SECONDS || "3600", 10);

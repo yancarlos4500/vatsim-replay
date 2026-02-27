@@ -12,7 +12,7 @@ A simple website that **records all VATSIM pilot positions** (callsign + positio
 - Stores pilot telemetry (`altitude`, `groundspeed`, `heading`) for replay labels
 - Resolves and stores the pilot's current airspace (from VATSpy boundaries)
 - Stores pilot route airports (`departure`, `destination`) from VATSIM flight plan data
-- Automatically prunes data older than 24 hours
+- Automatically prunes data older than 30 days (configurable)
 - Frontend map + timeline slider + play/pause
 - Two modes:
   - **All traffic** replay: shows all pilots at the selected time (fetches snapshot per step)
@@ -56,7 +56,7 @@ Server will serve the built client automatically.
 Copy `server/.env.example` to `server/.env` if you want to customize:
 - `PORT` (default 4000)
 - `POLL_INTERVAL_SECONDS` (default 15)
-- `RETENTION_HOURS` (default 24)
+- `RETENTION_HOURS` (default 720 = 30 days)
 - `DB_PATH` (default `./data/vatsim.sqlite`)
 
 ## Railway persistence
