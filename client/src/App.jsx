@@ -1062,7 +1062,21 @@ useEffect(() => {
             <Chip size="small" label={`Airspace: ${airspace?.features?.length ?? 0}`} />
             <Chip size="small" label={`TRACON: ${tracon?.features?.length ?? 0}`} />
           </Stack>
-          <Chip size="small" label={`Range: ${meta?.minTs ? fmt(meta.minTs) : "—"} → ${meta?.maxTs ? fmt(meta.maxTs) : "—"}`} />
+          <Chip
+            size="small"
+            label={`Range: ${meta?.minTs ? fmt(meta.minTs) : "—"} → ${meta?.maxTs ? fmt(meta.maxTs) : "—"}`}
+            sx={{
+              width: "100%",
+              height: "auto",
+              "& .MuiChip-label": {
+                whiteSpace: "normal",
+                overflowWrap: "anywhere",
+                display: "block",
+                paddingTop: "4px",
+                paddingBottom: "4px"
+              }
+            }}
+          />
         </Paper>
 
         <Paper variant="outlined" sx={{ p: 1.25, bgcolor: "rgba(255,255,255,0.03)" }}>
@@ -1147,7 +1161,22 @@ useEffect(() => {
           />
           <Typography variant="caption" sx={{ display: "block", mb: 1, opacity: 1, color: "text.secondary" }}>Each update advances one stored step (~{stepSeconds}s).</Typography>
 
-          <Chip size="small" sx={{ mb: 1 }} label={`Replay range: ${rangeStart ? fmt(rangeStart) : "—"} → ${rangeEnd ? fmt(rangeEnd) : "—"}`} />
+          <Chip
+            size="small"
+            sx={{
+              mb: 1,
+              width: "100%",
+              height: "auto",
+              "& .MuiChip-label": {
+                whiteSpace: "normal",
+                overflowWrap: "anywhere",
+                display: "block",
+                paddingTop: "4px",
+                paddingBottom: "4px"
+              }
+            }}
+            label={`Replay range: ${rangeStart ? fmt(rangeStart) : "—"} → ${rangeEnd ? fmt(rangeEnd) : "—"}`}
+          />
 
           <Typography variant="caption" sx={{ opacity: 1, color: "text.secondary" }}>Start</Typography>
           <Slider
