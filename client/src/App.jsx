@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { MapContainer, TileLayer, Marker, Polyline, GeoJSON, CircleMarker } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Polyline, GeoJSON, CircleMarker, Circle } from "react-leaflet";
 import L from "leaflet";
 import {
   Box,
@@ -106,27 +106,30 @@ L.Icon.Default.mergeOptions({
   shadowUrl: markerShadow
 });
 
-function planeDivIcon(callsign, heading, detailRows = []) {
-  const rot = Number.isFinite(heading) ? heading : 0;
+function planeDivIcon(callsign, heading, detailRows = [], showLabel = true) {
+  const normalizedHeading = Number.isFinite(heading)
+    ? ((heading % 360) + 360) % 360
+    : 0;
   const detailsHtml = detailRows.length > 0
     ? `<div class="planeDetails">${detailRows.map((row) => `<div class="planeDetailRow">${row}</div>`).join("")}</div>`
     : "";
+  const labelHtml = showLabel ? `<div class="planeLabel">${callsign}</div>` : "";
   const html = `
     <div class="planeMarker">
-      <div class="planeIcon" style="transform: rotate(${rot}deg)">
-        <svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true">
+      <div class="planeIcon planeIconLowQuality" style="transform: rotate(${normalizedHeading}deg);" aria-hidden="true">
+        <svg class="planeGlyph" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
           <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9L2 14v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5L21 16z" fill="currentColor"/>
         </svg>
       </div>
-      <div class="planeLabel">${callsign}</div>
+      ${labelHtml}
       ${detailsHtml}
     </div>
   `;
   return L.divIcon({
     className: "planeDivIcon",
     html,
-    iconSize: [1, 1],
-    iconAnchor: [0, 0]
+    iconSize: [26, 26],
+    iconAnchor: [13, 13]
   });
 }
 
@@ -143,6 +146,24 @@ function atcDivIcon(callsign) {
   return L.divIcon({
     className: "atcDivIcon",
     html,
+    iconSize: [20, 20],
+    iconAnchor: [10, 10]
+  });
+}
+
+function getDistanceNm(a, b) {
+  if (!a || !b) return null;
+  if (!Number.isFinite(a.lat) || !Number.isFinite(a.lon) || !Number.isFinite(b.lat) || !Number.isFinite(b.lon)) {
+    return null;
+  }
+  const meters = L.latLng(a.lat, a.lon).distanceTo(L.latLng(b.lat, b.lon));
+  return meters / 1852;
+}
+
+function distanceLabelIcon(text) {
+  return L.divIcon({
+    className: "distanceLabelIcon",
+    html: `<div class="distanceLabelBubble">${text}</div>`,
     iconSize: [1, 1],
     iconAnchor: [0, 0]
   });
@@ -330,6 +351,7 @@ export default function App() {
   const [showPilotAirspace, setShowPilotAirspace] = useState(true);
   const [showRouteAirports, setShowRouteAirports] = useState(true);
   const [showHistoryTrail, setShowHistoryTrail] = useState(false);
+  const [selectedRingMiles, setSelectedRingMiles] = useState([]);
   const [selectedAirspaces, setSelectedAirspaces] = useState([]);
   const [airspaceOptions, setAirspaceOptions] = useState([]);
   const [airportFilterText, setAirportFilterText] = useState("");
@@ -347,6 +369,7 @@ export default function App() {
   const [preloadedAtcSnapshots, setPreloadedAtcSnapshots] = useState(new Map());
   const [isPreloading, setIsPreloading] = useState(false);
   const [preloadProgress, setPreloadProgress] = useState(0);
+  const [distanceTargets, setDistanceTargets] = useState([]);
   const planeIconCache = useRef(new Map());
   const mapRef = useRef(null);
 
@@ -839,16 +862,16 @@ useEffect(() => {
     return [18.4, -66.0];
   }, [snapshot]);
 
-  const getPlaneIcon = useCallback((callsign, heading, detailRows) => {
+  const getPlaneIcon = useCallback((callsign, heading, detailRows, markerDetailLevel) => {
     const rounded = Number.isFinite(heading) ? Math.round(heading / 5) * 5 : 0;
     const detailsKey = Array.isArray(detailRows) ? detailRows.join("|") : "";
-    const key = `${callsign}:${rounded}:${detailsKey}`;
+    const key = `${callsign}:${rounded}:${markerDetailLevel}:${detailsKey}`;
     const cache = planeIconCache.current;
     let icon = cache.get(key);
     if (!icon) {
-      icon = planeDivIcon(callsign, rounded, detailRows);
+      icon = planeDivIcon(callsign, rounded, detailRows, markerDetailLevel !== "icon");
       cache.set(key, icon);
-      if (cache.size > 2000) cache.clear();
+      if (cache.size > 1200) cache.clear();
     }
     return icon;
   }, []);
@@ -981,7 +1004,12 @@ useEffect(() => {
   }, [atcOnlineTracon]);
 
   const snapshotMarkers = useMemo(() => {
+    const markerDetailLevel = visibleSnapshot.length > 350
+      ? "icon"
+      : (visibleSnapshot.length > 150 ? "label" : "full");
+
     const formatDetailRows = (p) => {
+      if (markerDetailLevel !== "full") return [];
       const rows = [];
       if (showRouteAirports) rows.push(`${p.departure || "—"}-${p.destination || "—"}`);
       if (showAltitude) rows.push(Number.isFinite(p.altitude) ? `${Math.round(p.altitude)} ft` : "—");
@@ -992,12 +1020,80 @@ useEffect(() => {
 
     return visibleSnapshot.map((p) => (
       <Marker
-        key={`${p.callsign}-${t}-${p.lat}-${p.lon}`}
+        key={p.callsign}
         position={[p.lat, p.lon]}
-        icon={getPlaneIcon(p.callsign, p.heading, formatDetailRows(p))}
+        icon={getPlaneIcon(p.callsign, p.heading, formatDetailRows(p), markerDetailLevel)}
+        eventHandlers={{
+          click: () => {
+            setDistanceTargets((prev) => {
+              const target = p.callsign;
+              if (prev.length === 0) return [target];
+              if (prev.length === 1) {
+                if (prev[0] === target) return [target];
+                return [prev[0], target];
+              }
+              return [target];
+            });
+          }
+        }}
       />
     ));
   }, [visibleSnapshot, getPlaneIcon, showRouteAirports, showAltitude, showGroundspeed, showPilotAirspace]);
+
+  const aircraftRings = useMemo(() => {
+    if (selectedRingMiles.length === 0) return [];
+    return visibleSnapshot.flatMap((p) => {
+      if (!Number.isFinite(p.lat) || !Number.isFinite(p.lon)) return [];
+      return selectedRingMiles.map((miles) => {
+        const radiusMeters = miles * 1852;
+        return (
+          <Circle
+            key={`ring-${p.callsign}-${miles}`}
+            center={[p.lat, p.lon]}
+            radius={radiusMeters}
+            pathOptions={{
+              color: "#66b2ff",
+              weight: 1,
+              opacity: 0.35,
+              fillOpacity: 0
+            }}
+          />
+        );
+      });
+    });
+  }, [visibleSnapshot, selectedRingMiles]);
+
+  const distanceTargetPositions = useMemo(() => {
+    if (distanceTargets.length === 0 || snapshot.length === 0) return [];
+    const byCallsign = new Map(snapshot.map((p) => [p.callsign, p]));
+    return distanceTargets
+      .map((callsign) => {
+        const row = byCallsign.get(callsign);
+        if (!row) return null;
+        if (!Number.isFinite(row.lat) || !Number.isFinite(row.lon)) return null;
+        return { callsign, lat: row.lat, lon: row.lon };
+      })
+      .filter(Boolean);
+  }, [distanceTargets, snapshot]);
+
+  const distanceNm = useMemo(() => {
+    if (distanceTargetPositions.length !== 2) return null;
+    return getDistanceNm(distanceTargetPositions[0], distanceTargetPositions[1]);
+  }, [distanceTargetPositions]);
+
+  const distanceLine = useMemo(() => {
+    if (distanceTargetPositions.length !== 2) return null;
+    return [
+      [distanceTargetPositions[0].lat, distanceTargetPositions[0].lon],
+      [distanceTargetPositions[1].lat, distanceTargetPositions[1].lon]
+    ];
+  }, [distanceTargetPositions]);
+
+  const distanceMidpoint = useMemo(() => {
+    if (!distanceLine) return null;
+    const [[lat1, lon1], [lat2, lon2]] = distanceLine;
+    return [(lat1 + lat2) / 2, (lon1 + lon2) / 2];
+  }, [distanceLine]);
 
   const historyTrailDots = useMemo(() => {
     if (!showHistoryTrail || mode !== "all" || t == null || preloadedSnapshots.size === 0 || snapshot.length === 0) {
@@ -1320,6 +1416,18 @@ useEffect(() => {
             <FormControlLabel control={<Checkbox checked={showAirspace} onChange={(e) => setShowAirspace(e.target.checked)} />} label="Show airspace" />
             <FormControlLabel control={<Checkbox checked={showTracon} onChange={(e) => setShowTracon(e.target.checked)} />} label="Show TRACON" />
             <FormControlLabel control={<Checkbox checked={showHistoryTrail} onChange={(e) => setShowHistoryTrail(e.target.checked)} />} label="Show history trail" />
+            <FormControlLabel
+              control={<Checkbox checked={selectedRingMiles.includes(3)} onChange={(e) => setSelectedRingMiles((prev) => e.target.checked ? Array.from(new Set([...prev, 3])).sort((a, b) => a - b) : prev.filter((x) => x !== 3))} />}
+              label="3 NM rings"
+            />
+            <FormControlLabel
+              control={<Checkbox checked={selectedRingMiles.includes(5)} onChange={(e) => setSelectedRingMiles((prev) => e.target.checked ? Array.from(new Set([...prev, 5])).sort((a, b) => a - b) : prev.filter((x) => x !== 5))} />}
+              label="5 NM rings"
+            />
+            <FormControlLabel
+              control={<Checkbox checked={selectedRingMiles.includes(10)} onChange={(e) => setSelectedRingMiles((prev) => e.target.checked ? Array.from(new Set([...prev, 10])).sort((a, b) => a - b) : prev.filter((x) => x !== 10))} />}
+              label="10 NM rings"
+            />
             <FormControlLabel control={<Checkbox checked={showAltitude} onChange={(e) => setShowAltitude(e.target.checked)} />} label="Show altitude" />
             <FormControlLabel control={<Checkbox checked={showGroundspeed} onChange={(e) => setShowGroundspeed(e.target.checked)} />} label="Show groundspeed" />
             <FormControlLabel control={<Checkbox checked={hideBelow30Knots} onChange={(e) => setHideBelow30Knots(e.target.checked)} />} label="< 30 knots" />
@@ -1331,11 +1439,19 @@ useEffect(() => {
         <Paper variant="outlined" sx={{ p: 1.25, bgcolor: "rgba(255,255,255,0.03)" }}>
           <Typography variant="overline" sx={{ opacity: 1, color: "text.secondary" }}>Selection</Typography>
           {mode === "all" ? (
-            <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
-              <Chip size="small" label={`Showing: ${snapshot.length.toLocaleString()} aircraft`} />
-              <Chip size="small" label={`Airspace: ${selectedAirspaces.length === 0 ? "All" : selectedAirspaces.join(", ")}`} />
-              <Chip size="small" label={`Airport: ${airportFilterText || "All"}`} />
-              <Chip size="small" label={`Altitude: ${minAltitude || "0"} - ${maxAltitude || "∞"} ft`} />
+            <Stack spacing={1}>
+              <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                <Chip size="small" label={`Showing: ${snapshot.length.toLocaleString()} aircraft`} />
+                <Chip size="small" label={`Airspace: ${selectedAirspaces.length === 0 ? "All" : selectedAirspaces.join(", ")}`} />
+                <Chip size="small" label={`Airport: ${airportFilterText || "All"}`} />
+                <Chip size="small" label={`Altitude: ${minAltitude || "0"} - ${maxAltitude || "∞"} ft`} />
+              </Stack>
+              <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                <Chip size="small" label={distanceTargets[0] ? `Target A: ${distanceTargets[0]}` : "Target A: click aircraft"} />
+                <Chip size="small" label={distanceTargets[1] ? `Target B: ${distanceTargets[1]}` : "Target B: click second aircraft"} />
+                <Chip size="small" color={distanceNm != null ? "success" : "default"} label={distanceNm != null ? `Distance: ${distanceNm.toFixed(1)} NM` : "Distance: —"} />
+              </Stack>
+              <Button size="small" variant="outlined" onClick={() => setDistanceTargets([])} disabled={distanceTargets.length === 0}>Clear Distance</Button>
             </Stack>
           ) : (
             <Stack spacing={1}>
@@ -1380,6 +1496,29 @@ useEffect(() => {
         ))}
 
         {mode === "all" && snapshotMarkers}
+
+        {mode === "all" && aircraftRings}
+
+        {mode === "all" && distanceLine && (
+          <Polyline positions={distanceLine} pathOptions={{ color: "#ffb74d", weight: 2, dashArray: "6, 6" }} />
+        )}
+
+        {mode === "all" && distanceMidpoint && distanceNm != null && (
+          <Marker
+            position={distanceMidpoint}
+            icon={distanceLabelIcon(`${distanceNm.toFixed(1)} NM`)}
+            interactive={false}
+          />
+        )}
+
+        {mode === "all" && distanceTargetPositions.map((target) => (
+          <CircleMarker
+            key={`distance-target-${target.callsign}`}
+            center={[target.lat, target.lon]}
+            radius={6}
+            pathOptions={{ color: "#ffb74d", fillColor: "#ffb74d", fillOpacity: 0.4, weight: 2 }}
+          />
+        ))}
 
         {mode === "track" && track.length > 1 && (
           <Polyline positions={track} />

@@ -64,13 +64,12 @@ small { opacity: 0.75; }
   justify-content: flex-start;
 }
 
-.planeDivIcon { background: transparent; border: none; }
+.planeDivIcon { background: transparent; border: none; cursor: pointer; }
 .planeMarker {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  transform: translate(-50%, -50%);
   pointer-events: none; /* clicks pass through */
   color: #e6edf3;
   text-shadow: 0 1px 2px rgba(0,0,0,0.7);
@@ -81,6 +80,18 @@ small { opacity: 0.75; }
   display: grid;
   place-items: center;
   filter: drop-shadow(0 2px 4px rgba(0,0,0,0.55));
+}
+
+.planeIconLowQuality {
+  background: transparent;
+  border: none;
+  color: #b8dcff;
+  transform-origin: 50% 50%;
+  line-height: 1;
+}
+
+.planeGlyph {
+  display: block;
 }
 .planeLabel {
   font-size: 12px;
@@ -117,7 +128,6 @@ small { opacity: 0.75; }
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  transform: translate(-50%, -50%);
   pointer-events: none;
   color: #ffd700;
   text-shadow: 0 1px 2px rgba(0,0,0,0.7);
@@ -151,6 +161,35 @@ small { opacity: 0.75; }
   font-size: 12px;
   font-weight: 600;
   padding: 2px 6px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+}
+
+.leaflet-tooltip.distanceTooltip {
+  background: rgba(12, 18, 26, 0.92);
+  color: #ffb74d;
+  border: 1px solid rgba(255, 183, 77, 0.45);
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 2px 6px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+}
+
+.distanceLabelIcon {
+  background: transparent;
+  border: none;
+}
+
+.distanceLabelBubble {
+  transform: translate(-50%, -50%);
+  background: rgba(12, 18, 26, 0.92);
+  color: #ffb74d;
+  border: 1px solid rgba(255, 183, 77, 0.45);
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 2px 6px;
+  white-space: nowrap;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
 }
 
