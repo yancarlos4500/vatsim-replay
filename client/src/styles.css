@@ -1,7 +1,14 @@
 :root { color-scheme: dark; }
-body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background: #0b0f14; color: #e6edf3; }
+html, body, #root {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background: #0b0f14; color: #e6edf3; }
 a { color: inherit; }
-.panel { position: relative; width: 360px; height: 100vh; overflow-y: auto; flex-shrink: 0; background: linear-gradient(180deg, rgba(12, 18, 26, 0.94), rgba(9, 14, 20, 0.94)); border-right: 1px solid rgba(255,255,255,0.08); padding: 12px; backdrop-filter: blur(10px); display: flex; flex-direction: column; gap: 10px; }
+.panel { position: relative; width: 360px; height: 100dvh; overflow-y: auto; flex-shrink: 0; background: linear-gradient(180deg, rgba(12, 18, 26, 0.94), rgba(9, 14, 20, 0.94)); border-right: 1px solid rgba(255,255,255,0.08); padding: 12px; backdrop-filter: blur(10px); display: flex; flex-direction: column; gap: 10px; scrollbar-width: none; -ms-overflow-style: none; }
+.panel::-webkit-scrollbar { display: none; }
 .row { display: flex; flex-direction: column; gap: 4px; align-items: stretch; padding: 0; }
 .row > * { flex: 0 0 auto; }
 .label { font-size: 12px; opacity: 0.8; text-transform: uppercase; letter-spacing: 0.04em; }
@@ -10,7 +17,7 @@ button { cursor: pointer; }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 small { opacity: 0.75; }
 .slider { width: 100%; max-width: 100%; }
-.mapWrap { height: 100vh; width: 100vw; display: flex; flex-direction: row; }
+.mapWrap { height: 100dvh; width: 100%; display: flex; flex-direction: row; overflow: hidden; }
 .badge { display: inline-flex; gap: 3px; align-items: center; padding: 3px 7px; border-radius: 999px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08); font-size: 13px; }
 
 .panelHeader {

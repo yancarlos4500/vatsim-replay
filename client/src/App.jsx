@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { MapContainer, TileLayer, Marker, Polyline, GeoJSON, CircleMarker, Circle } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Polyline, GeoJSON, CircleMarker, Circle, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import {
   Box,
@@ -178,6 +178,13 @@ function useInterval(cb, delay, enabled) {
     const id = setInterval(() => ref.current(), delay);
     return () => clearInterval(id);
   }, [delay, enabled]);
+}
+
+function MapClickHandler({ onClick }) {
+  useMapEvents({
+    click: () => onClick()
+  });
+  return null;
 }
 
 // Mapping of VATSIM sector codes to GeoJSON boundary IDs
@@ -1004,9 +1011,7 @@ useEffect(() => {
   }, [atcOnlineTracon]);
 
   const snapshotMarkers = useMemo(() => {
-    const markerDetailLevel = visibleSnapshot.length > 350
-      ? "icon"
-      : (visibleSnapshot.length > 150 ? "label" : "full");
+    const markerDetailLevel = "full";
 
     const formatDetailRows = (p) => {
       if (markerDetailLevel !== "full") return [];
@@ -1472,6 +1477,7 @@ useEffect(() => {
       </ThemeProvider>
 
       <MapContainer ref={mapRef} center={center} zoom={5} style={{ height: "100%", width: "100%" }}>
+        <MapClickHandler onClick={() => setDistanceTargets([])} />
         <TileLayer
           attribution="&copy; OpenStreetMap contributors &copy; CARTO"
           url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
