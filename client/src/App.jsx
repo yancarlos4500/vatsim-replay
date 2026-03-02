@@ -160,6 +160,15 @@ function getDistanceNm(a, b) {
   return meters / 1852;
 }
 
+function formatEtaHours(hours) {
+  if (!Number.isFinite(hours) || hours < 0) return "—";
+  const totalMinutes = Math.round(hours * 60);
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  if (h <= 0) return `${m}m`;
+  return `${h}h ${m}m`;
+}
+
 function distanceLabelIcon(text) {
   return L.divIcon({
     className: "distanceLabelIcon",
@@ -1076,7 +1085,7 @@ useEffect(() => {
         const row = byCallsign.get(callsign);
         if (!row) return null;
         if (!Number.isFinite(row.lat) || !Number.isFinite(row.lon)) return null;
-        return { callsign, lat: row.lat, lon: row.lon };
+        return { callsign, lat: row.lat, lon: row.lon, groundspeed: row.groundspeed };
       })
       .filter(Boolean);
   }, [distanceTargets, snapshot]);
@@ -1099,6 +1108,21 @@ useEffect(() => {
     const [[lat1, lon1], [lat2, lon2]] = distanceLine;
     return [(lat1 + lat2) / 2, (lon1 + lon2) / 2];
   }, [distanceLine]);
+
+  const distanceEtaText = useMemo(() => {
+    if (distanceTargetPositions.length !== 2 || distanceNm == null) return "—";
+    const gsA = Number.isFinite(distanceTargetPositions[0].groundspeed) ? Math.max(0, distanceTargetPositions[0].groundspeed) : null;
+    const gsB = Number.isFinite(distanceTargetPositions[1].groundspeed) ? Math.max(0, distanceTargetPositions[1].groundspeed) : null;
+    if (gsA == null || gsB == null) return "—";
+    const avgGs = (gsA + gsB) / 2;
+    if (!Number.isFinite(avgGs) || avgGs <= 0) return "—";
+    return formatEtaHours(distanceNm / avgGs);
+  }, [distanceTargetPositions, distanceNm]);
+
+  const distanceLabelText = useMemo(() => {
+    if (distanceNm == null) return "—";
+    return `${distanceNm.toFixed(1)} NM • ${distanceEtaText}`;
+  }, [distanceNm, distanceEtaText]);
 
   const historyTrailDots = useMemo(() => {
     if (!showHistoryTrail || mode !== "all" || t == null || preloadedSnapshots.size === 0 || snapshot.length === 0) {
@@ -1454,7 +1478,7 @@ useEffect(() => {
               <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
                 <Chip size="small" label={distanceTargets[0] ? `Target A: ${distanceTargets[0]}` : "Target A: click aircraft"} />
                 <Chip size="small" label={distanceTargets[1] ? `Target B: ${distanceTargets[1]}` : "Target B: click second aircraft"} />
-                <Chip size="small" color={distanceNm != null ? "success" : "default"} label={distanceNm != null ? `Distance: ${distanceNm.toFixed(1)} NM` : "Distance: —"} />
+                <Chip size="small" color={distanceNm != null ? "success" : "default"} label={distanceNm != null ? `Distance: ${distanceNm.toFixed(1)} NM • ${distanceEtaText}` : "Distance: —"} />
               </Stack>
               <Button size="small" variant="outlined" onClick={() => setDistanceTargets([])} disabled={distanceTargets.length === 0}>Clear Distance</Button>
             </Stack>
@@ -1512,7 +1536,7 @@ useEffect(() => {
         {mode === "all" && distanceMidpoint && distanceNm != null && (
           <Marker
             position={distanceMidpoint}
-            icon={distanceLabelIcon(`${distanceNm.toFixed(1)} NM`)}
+            icon={distanceLabelIcon(distanceLabelText)}
             interactive={false}
           />
         )}
