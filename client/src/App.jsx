@@ -381,6 +381,8 @@ export default function App() {
   const [debouncedRangeStart, setDebouncedRangeStart] = useState(null);
   const [debouncedRangeEnd, setDebouncedRangeEnd] = useState(null);
   const [mapBounds, setMapBounds] = useState(null);
+  const [airspaceOptionsLoaded, setAirspaceOptionsLoaded] = useState(false);
+  const [airportOptionsLoaded, setAirportOptionsLoaded] = useState(false);
   const [preloadedSnapshots, setPreloadedSnapshots] = useState(new Map());
   const [preloadedAtcSnapshots, setPreloadedAtcSnapshots] = useState(new Map());
   const [isPreloading, setIsPreloading] = useState(false);
@@ -388,6 +390,8 @@ export default function App() {
   const [distanceTargets, setDistanceTargets] = useState([]);
   const planeIconCache = useRef(new Map());
   const mapRef = useRef(null);
+  const airspaceOptionsRequestRef = useRef(null);
+  const airportOptionsRequestRef = useRef(null);
 
   const bounds = useMemo(() => {
     if (!meta?.minTs || !meta?.maxTs) return null;
@@ -646,6 +650,40 @@ useEffect(() => {
     setAirportOptions(unique);
   }
 
+  async function ensureAirspaceOptionsLoaded(force = false) {
+    if (!bounds) return;
+    if (!force && airspaceOptionsLoaded) return;
+    if (airspaceOptionsRequestRef.current) return airspaceOptionsRequestRef.current;
+
+    const request = refreshAirspaceOptions()
+      .then(() => {
+        setAirspaceOptionsLoaded(true);
+      })
+      .finally(() => {
+        airspaceOptionsRequestRef.current = null;
+      });
+
+    airspaceOptionsRequestRef.current = request;
+    return request;
+  }
+
+  async function ensureAirportOptionsLoaded(force = false) {
+    if (!bounds) return;
+    if (!force && airportOptionsLoaded) return;
+    if (airportOptionsRequestRef.current) return airportOptionsRequestRef.current;
+
+    const request = refreshAirportOptions()
+      .then(() => {
+        setAirportOptionsLoaded(true);
+      })
+      .finally(() => {
+        airportOptionsRequestRef.current = null;
+      });
+
+    airportOptionsRequestRef.current = request;
+    return request;
+  }
+
   async function refreshEvents(forceRefresh = false) {
     const r = await getEvents(1000, forceRefresh);
     setEventOptions(Array.isArray(r?.rows) ? r.rows : []);
@@ -806,9 +844,14 @@ useEffect(() => {
   }, [t, mode, selectedAirspaces, airportFilterText]);
 
   useEffect(() => {
-    refreshAirspaceOptions().catch(console.error);
-    refreshAirportOptions().catch(console.error);
-  }, [bounds, debouncedRangeStart, debouncedRangeEnd]);
+    if (!bounds) return;
+    if (airspaceOptionsLoaded) {
+      ensureAirspaceOptionsLoaded(true).catch(console.error);
+    }
+    if (airportOptionsLoaded) {
+      ensureAirportOptionsLoaded(true).catch(console.error);
+    }
+  }, [bounds, debouncedRangeStart, debouncedRangeEnd, airspaceOptionsLoaded, airportOptionsLoaded]);
 
   useEffect(() => {
     refreshEvents(false).catch(console.error);
@@ -1394,6 +1437,7 @@ useEffect(() => {
               multiple
               value={selectedAirspaces} 
               onChange={(e) => setSelectedAirspaces(e.target.value)}
+              onOpen={() => ensureAirspaceOptionsLoaded().catch(console.error)}
               renderValue={(selected) => selected.length === 0 ? "All airspaces" : selected.join(", ")}
             >
               {airspaceOptions.map((name) => (
@@ -1408,6 +1452,7 @@ useEffect(() => {
             fullWidth
             value={airportFilterText}
             onChange={(e) => setAirportFilterText(e.target.value.toUpperCase())}
+            onFocus={() => ensureAirportOptionsLoaded().catch(console.error)}
             placeholder="KJFK, KLAX"
             inputProps={{ list: "airport-options" }}
           />

@@ -107,6 +107,93 @@ function buildAirspaceFilterClause(airspaces) {
   };
 }
 
+function recomputeSnapshotStats(db) {
+  const row = db.prepare(`
+    SELECT MIN(ts) AS minTs, MAX(ts) AS maxTs, COUNT(*) AS rows
+    FROM snapshots
+  `).get() ?? { minTs: null, maxTs: null, rows: 0 };
+
+  db.prepare(`
+    INSERT INTO snapshot_stats (id, min_ts, max_ts, row_count)
+    VALUES (1, @minTs, @maxTs, @rows)
+    ON CONFLICT(id) DO UPDATE SET
+      min_ts = excluded.min_ts,
+      max_ts = excluded.max_ts,
+      row_count = excluded.row_count
+  `).run({
+    minTs: row.minTs ?? null,
+    maxTs: row.maxTs ?? null,
+    rows: row.rows ?? 0
+  });
+
+  return row;
+}
+
+function ensureSnapshotStats(db) {
+  const stats = db.prepare(`
+    SELECT min_ts AS minTs, max_ts AS maxTs, row_count AS rows
+    FROM snapshot_stats
+    WHERE id = 1
+  `).get();
+
+  if (!stats) {
+    recomputeSnapshotStats(db);
+  }
+}
+
+function incrementSnapshotStats(db, ts, rowCount) {
+  if (!Number.isFinite(ts) || !Number.isFinite(rowCount) || rowCount <= 0) {
+    return;
+  }
+
+  db.prepare(`
+    INSERT INTO snapshot_stats (id, min_ts, max_ts, row_count)
+    VALUES (1, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      min_ts = CASE
+        WHEN snapshot_stats.min_ts IS NULL OR excluded.min_ts < snapshot_stats.min_ts THEN excluded.min_ts
+        ELSE snapshot_stats.min_ts
+      END,
+      max_ts = CASE
+        WHEN snapshot_stats.max_ts IS NULL OR excluded.max_ts > snapshot_stats.max_ts THEN excluded.max_ts
+        ELSE snapshot_stats.max_ts
+      END,
+      row_count = snapshot_stats.row_count + excluded.row_count
+  `).run(ts, ts, rowCount);
+}
+
+function decrementSnapshotStats(db, cutoffTs, removedCount) {
+  if (!Number.isFinite(removedCount) || removedCount <= 0) {
+    return;
+  }
+
+  const current = db.prepare(`
+    SELECT min_ts AS minTs, max_ts AS maxTs, row_count AS rows
+    FROM snapshot_stats
+    WHERE id = 1
+  `).get() ?? { minTs: null, maxTs: null, rows: 0 };
+
+  const nextRows = Math.max(0, (current.rows ?? 0) - removedCount);
+  let nextMinTs = current.minTs ?? null;
+  let nextMaxTs = current.maxTs ?? null;
+
+  if (nextRows === 0) {
+    nextMinTs = null;
+    nextMaxTs = null;
+  } else if (nextMinTs != null && Number.isFinite(cutoffTs) && nextMinTs < cutoffTs) {
+    nextMinTs = db.prepare(`SELECT MIN(ts) AS minTs FROM snapshots`).get()?.minTs ?? null;
+  }
+
+  db.prepare(`
+    INSERT INTO snapshot_stats (id, min_ts, max_ts, row_count)
+    VALUES (1, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      min_ts = excluded.min_ts,
+      max_ts = excluded.max_ts,
+      row_count = excluded.row_count
+  `).run(nextMinTs, nextMaxTs, nextRows);
+}
+
 export function openDb(dbPath) {
   mkdirSync(dirname(dbPath), { recursive: true });
   const db = new Database(dbPath);
@@ -124,6 +211,12 @@ export function openDb(dbPath) {
       airspace TEXT,
       departure TEXT,
       destination TEXT
+    );
+    CREATE TABLE IF NOT EXISTS snapshot_stats (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      min_ts INTEGER,
+      max_ts INTEGER,
+      row_count INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_snapshots_ts ON snapshots(ts);
     CREATE INDEX IF NOT EXISTS idx_snapshots_callsign_ts ON snapshots(callsign, ts);
@@ -165,6 +258,7 @@ export function openDb(dbPath) {
   `);
   ensureSnapshotColumns(db);
   ensureEventColumns(db);
+  ensureSnapshotStats(db);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_snapshots_airspace_ts ON snapshots(airspace, ts);`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_snapshots_departure_ts ON snapshots(departure, ts);`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_snapshots_destination_ts ON snapshots(destination, ts);`);
@@ -297,6 +391,7 @@ export function insertSnapshots(db, ts, pilots) {
     destination: p.destination ?? null
   }));
   insertMany(rows);
+  incrementSnapshotStats(db, ts, rows.length);
   return rows.length;
 }
 
@@ -313,6 +408,7 @@ export function pruneOld(db, cutoffTs) {
           AND snapshots.ts BETWEEN e.start_ts AND e.end_ts
       )
   `).run(cutoffTs);
+  decrementSnapshotStats(db, cutoffTs, info.changes ?? 0);
   return info.changes ?? 0;
 }
 
@@ -533,10 +629,16 @@ export function getAirportsInRange(db, sinceTs, untilTs, limit = 3000) {
 
 export function getRangeMeta(db) {
   const row = db.prepare(`
-    SELECT MIN(ts) AS minTs, MAX(ts) AS maxTs, COUNT(*) AS rows
-    FROM snapshots
+    SELECT min_ts AS minTs, max_ts AS maxTs, row_count AS rows
+    FROM snapshot_stats
+    WHERE id = 1
   `).get();
-  return row ?? { minTs: null, maxTs: null, rows: 0 };
+
+  if (!row) {
+    return recomputeSnapshotStats(db);
+  }
+
+  return row;
 }
 
 export function getStoredEvents(db, fromIso = null, toIso = null, limit = 200, onlyWithData = true) {
