@@ -21,7 +21,7 @@ import {
 } from "@mui/material";
 import { createTheme, ThemeProvider } from "@mui/material/styles";
 import { getMeta, getCallsigns, getTrack, getAirspace, getTracon, getAirspaces, getAirports, getEvents, getPreloadSnapshots } from "./api";
-import { fmt, clamp } from "./time";
+import { fmt, clamp, toDateTimeLocalValue, fromDateTimeLocalValue } from "./time";
 
 const panelTheme = createTheme({
   palette: {
@@ -1262,7 +1262,7 @@ useEffect(() => {
                 size="small" 
                 fullWidth
                 onClick={() => loadSnapshotsForRange()} 
-                disabled={!bounds || !rangeStart || !rangeEnd || isPreloading}
+                disabled={!bounds || rangeStart == null || rangeEnd == null || isPreloading}
               >
                 {preloadedSnapshots.size > 0 ? `✓ Loaded (${preloadedSnapshots.size})` : "Load Snapshots"}
               </Button>
@@ -1343,34 +1343,48 @@ useEffect(() => {
                 paddingBottom: "4px"
               }
             }}
-            label={`Replay range: ${rangeStart ? fmt(rangeStart) : "—"} → ${rangeEnd ? fmt(rangeEnd) : "—"}`}
+            label={`Replay range: ${rangeStart != null ? fmt(rangeStart) : "—"} → ${rangeEnd != null ? fmt(rangeEnd) : "—"}`}
           />
 
-          <Typography variant="caption" sx={{ opacity: 1, color: "text.secondary" }}>Start</Typography>
-          <Slider
-            value={rangeStart ?? (bounds?.min ?? 0)}
-            min={allowedRangeBounds?.min ?? (bounds?.min ?? 0)}
-            max={Math.max(
-              allowedRangeBounds?.min ?? (bounds?.min ?? 0),
-              Math.min(rangeEnd ?? (allowedRangeBounds?.max ?? (bounds?.max ?? 0)), allowedRangeBounds?.max ?? (bounds?.max ?? 0))
-            )}
-            step={sliderStepSeconds}
-            onChange={(_, value) => setRangeStart(Array.isArray(value) ? value[0] : value)}
-            disabled={!bounds}
-          />
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ mb: 1 }}>
+            <TextField
+              label="Start"
+              type="datetime-local"
+              size="small"
+              fullWidth
+              value={toDateTimeLocalValue(rangeStart)}
+              onChange={(e) => {
+                const nextTs = fromDateTimeLocalValue(e.target.value);
+                if (nextTs != null) setRangeStart(nextTs);
+              }}
+              disabled={!bounds}
+              InputLabelProps={{ shrink: true }}
+              inputProps={{
+                min: toDateTimeLocalValue(allowedRangeBounds?.min ?? bounds?.min),
+                max: toDateTimeLocalValue(rangeEnd ?? allowedRangeBounds?.max ?? bounds?.max),
+                step: sliderStepSeconds
+              }}
+            />
 
-          <Typography variant="caption" sx={{ opacity: 1, color: "text.secondary" }}>End</Typography>
-          <Slider
-            value={rangeEnd ?? (bounds?.max ?? 0)}
-            min={Math.min(
-              allowedRangeBounds?.max ?? (bounds?.max ?? 0),
-              Math.max(rangeStart ?? (allowedRangeBounds?.min ?? (bounds?.min ?? 0)), allowedRangeBounds?.min ?? (bounds?.min ?? 0))
-            )}
-            max={allowedRangeBounds?.max ?? (bounds?.max ?? 0)}
-            step={sliderStepSeconds}
-            onChange={(_, value) => setRangeEnd(Array.isArray(value) ? value[0] : value)}
-            disabled={!bounds}
-          />
+            <TextField
+              label="End"
+              type="datetime-local"
+              size="small"
+              fullWidth
+              value={toDateTimeLocalValue(rangeEnd)}
+              onChange={(e) => {
+                const nextTs = fromDateTimeLocalValue(e.target.value);
+                if (nextTs != null) setRangeEnd(nextTs);
+              }}
+              disabled={!bounds}
+              InputLabelProps={{ shrink: true }}
+              inputProps={{
+                min: toDateTimeLocalValue(rangeStart ?? allowedRangeBounds?.min ?? bounds?.min),
+                max: toDateTimeLocalValue(allowedRangeBounds?.max ?? bounds?.max),
+                step: sliderStepSeconds
+              }}
+            />
+          </Stack>
 
           <Button
             fullWidth
