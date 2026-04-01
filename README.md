@@ -70,3 +70,16 @@ If `DB_PATH` is not set, the server now auto-detects Railway volume mounts in th
 - `RAILWAY_VOLUME_MOUNT_PATH/vatsim.sqlite`
 - `/data/vatsim.sqlite` (if `/data` exists)
 - fallback to local `server/data/vatsim.sqlite`
+
+## Railway + Bun (Nixpacks)
+
+Deployment is configured to use Bun on Railway Nixpacks:
+- Build: `bun install && bun run build`
+- Start: `bun run start`
+
+If you need to mirror Railway behavior locally, use Bun from the project root:
+```bash
+bun install
+bun run build
+bun run start
+```
