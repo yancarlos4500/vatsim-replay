@@ -265,8 +265,11 @@ export function openDb(dbPath) {
   db.exec(`CREATE INDEX IF NOT EXISTS idx_snapshots_ts_airspace ON snapshots(ts, airspace);`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_snapshots_ts_departure ON snapshots(ts, departure);`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_snapshots_ts_destination ON snapshots(ts, destination);`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_snapshots_ts_callsign ON snapshots(ts, callsign);`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_events_start_ts ON events(start_ts);`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_events_end_ts ON events(end_ts);`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_events_start_ts_end_ts ON events(start_ts, end_ts);`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_events_start_time_end_time ON events(start_time, end_time);`);
   return db;
 }
 
