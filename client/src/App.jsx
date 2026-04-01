@@ -363,9 +363,9 @@ export default function App() {
   const [callsign, setCallsign] = useState("");
   const [callsigns, setCallsigns] = useState([]);
   const [track, setTrackState] = useState([]);
-  const [showAirspace, setShowAirspace] = useState(true);
+  const [showAirspace, setShowAirspace] = useState(false);
   const [airspace, setAirspace] = useState(null);
-  const [showTracon, setShowTracon] = useState(true);
+  const [showTracon, setShowTracon] = useState(false);
   const [tracon, setTracon] = useState(null);
   const [showAltitude, setShowAltitude] = useState(true);
   const [showGroundspeed, setShowGroundspeed] = useState(true);
@@ -528,13 +528,6 @@ useEffect(() => {
     }
   })();
 }, [showAirspace, airspace]);
-
-// Auto-toggle airspace and TRACON visibility with replay
-useEffect(() => {
-  if (!playing) return;
-  setShowAirspace(true);
-  setShowTracon(true);
-}, [playing]);
 
 useEffect(() => {
   // If the toggle is off, do nothing. If tracon already has features, skip fetch.
@@ -1083,7 +1076,11 @@ useEffect(() => {
   }, [atcOnlineTracon]);
 
   const snapshotMarkers = useMemo(() => {
-    const markerDetailLevel = "full";
+    const markerDetailLevel = visibleSnapshot.length > 600
+      ? "icon"
+      : visibleSnapshot.length > 200
+        ? "label"
+        : "full";
 
     const formatDetailRows = (p) => {
       if (markerDetailLevel !== "full") return [];
@@ -1247,8 +1244,8 @@ useEffect(() => {
           <Typography variant="h6" sx={{ fontWeight: 700, mb: 1 }}>VATSIM Traffic Replay</Typography>
           <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1 }}>
             <Chip size="small" label={`Stored: ${meta?.rows?.toLocaleString?.() ?? "—"} pts`} />
-            <Chip size="small" label={`Airspace: ${airspace?.features?.length ?? 0}`} />
-            <Chip size="small" label={`TRACON: ${tracon?.features?.length ?? 0}`} />
+            <Chip size="small" label={showAirspace ? `Airspace: ${airspace?.features?.length ?? "loading"}` : "Airspace: off"} />
+            <Chip size="small" label={showTracon ? `TRACON: ${tracon?.features?.length ?? "loading"}` : "TRACON: off"} />
           </Stack>
           <Chip
             size="small"
