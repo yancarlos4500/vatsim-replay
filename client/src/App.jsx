@@ -768,8 +768,12 @@ useEffect(() => {
 
       const timestamps = Array.isArray(result?.timestamps) ? result.timestamps : [];
       const sourceTsByBucket = result?.sourceTsByBucket ?? {};
+      const rowsBySourceTs = result?.rowsBySourceTs ?? {};
+      const atcRowsBySourceTs = result?.atcRowsBySourceTs ?? {};
       const rowsByTs = result?.rowsByTs ?? {};
       const atcRowsByTs = result?.atcRowsByTs ?? {};
+      const hasSourcePayload =
+        Object.keys(rowsBySourceTs).length > 0 || Object.keys(atcRowsBySourceTs).length > 0;
       const total = timestamps.length || 1;
 
       if (progressTimer) {
@@ -780,8 +784,13 @@ useEffect(() => {
       let lastSourceTs = null;
       timestamps.forEach((ts, index) => {
         const sourceTsForBucket = sourceTsByBucket[String(ts)] ?? sourceTsByBucket[ts] ?? null;
-        const pilotRows = rowsByTs[String(ts)] || rowsByTs[ts] || [];
-        const atcRows = atcRowsByTs[String(ts)] || atcRowsByTs[ts] || [];
+        const sourceKey = sourceTsForBucket != null ? String(sourceTsForBucket) : null;
+        const pilotRows = hasSourcePayload
+          ? (sourceKey != null ? (rowsBySourceTs[sourceKey] || []) : [])
+          : (rowsByTs[String(ts)] || rowsByTs[ts] || []);
+        const atcRows = hasSourcePayload
+          ? (sourceKey != null ? (atcRowsBySourceTs[sourceKey] || []) : [])
+          : (atcRowsByTs[String(ts)] || atcRowsByTs[ts] || []);
 
         if (sourceTsForBucket != null && sourceTsForBucket === lastSourceTs) {
           const mappedProgress = 90 + Math.round(((index + 1) / total) * 10);

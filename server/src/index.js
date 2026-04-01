@@ -567,20 +567,15 @@ app.get("/api/preload-snapshots", async (req, res) => {
       const to = until + window;
       const availableTs = getSnapshotTimestampsInRange(db, from, to);
 
-      const timestamps = [];
-      const rowsByTs = {};
-      const atcRowsByTs = {};
-      const sourceTsByBucket = {};
+      const requestedTimestamps = [];
       for (let ts = since; ts <= until; ts += step) {
-        timestamps.push(ts);
-        rowsByTs[ts] = [];
-        atcRowsByTs[ts] = [];
+        requestedTimestamps.push(ts);
       }
 
       const bucketToSourceTs = new Map();
       if (availableTs.length > 0) {
         let index = 0;
-        for (const bucketTs of timestamps) {
+        for (const bucketTs of requestedTimestamps) {
           while (index + 1 < availableTs.length && availableTs[index + 1] <= bucketTs) {
             index += 1;
           }
@@ -614,12 +609,29 @@ app.get("/api/preload-snapshots", async (req, res) => {
         atcBySourceTs.get(row.ts).push(row);
       }
 
-      for (const bucketTs of timestamps) {
+      const timestamps = [];
+      const sourceTsByBucket = {};
+      const rowsBySourceTs = {};
+      const atcRowsBySourceTs = {};
+
+      for (const bucketTs of requestedTimestamps) {
         const sourceTsForBucket = bucketToSourceTs.get(bucketTs);
         if (sourceTsForBucket == null) continue;
+
+        const pilotForSource = pilotBySourceTs.get(sourceTsForBucket) || [];
+        const atcForSource = atcBySourceTs.get(sourceTsForBucket) || [];
+        if (pilotForSource.length === 0 && atcForSource.length === 0) continue;
+
+        const sourceKey = String(sourceTsForBucket);
+        if (!rowsBySourceTs[sourceKey]) {
+          rowsBySourceTs[sourceKey] = pilotForSource.map(({ ts, ...row }) => row);
+        }
+        if (!atcRowsBySourceTs[sourceKey]) {
+          atcRowsBySourceTs[sourceKey] = atcForSource.map(({ ts, ...row }) => row);
+        }
+
+        timestamps.push(bucketTs);
         sourceTsByBucket[bucketTs] = sourceTsForBucket;
-        rowsByTs[bucketTs] = (pilotBySourceTs.get(sourceTsForBucket) || []).map(({ ts, ...row }) => row);
-        atcRowsByTs[bucketTs] = (atcBySourceTs.get(sourceTsForBucket) || []).map(({ ts, ...row }) => row);
       }
 
       return {
@@ -634,8 +646,8 @@ app.get("/api/preload-snapshots", async (req, res) => {
         maxAltitude,
         timestamps,
         sourceTsByBucket,
-        rowsByTs,
-        atcRowsByTs
+        rowsBySourceTs,
+        atcRowsBySourceTs
       };
     });
   } catch (e) {
