@@ -23,6 +23,107 @@ const MAX_REPLAY_RANGE_SECONDS = 24 * 3600;
 const EVENTS_LATEST_NUM = parseInt(process.env.EVENTS_LATEST_NUM || "150", 10);
 const EVENT_POLL_INTERVAL_SECONDS = parseInt(process.env.EVENT_POLL_INTERVAL_SECONDS || "3600", 10);
 const EVENTS_API_BASE = process.env.EVENTS_API_BASE || "https://my.vatsim.net/api/v2/events/latest";
+const API_RESPONSE_CACHE_MAX_ENTRIES = parseInt(process.env.API_RESPONSE_CACHE_MAX_ENTRIES || "300", 10);
+const API_RESPONSE_CACHE_MAX_BYTES = parseInt(process.env.API_RESPONSE_CACHE_MAX_BYTES || "10485760", 10);
+
+const apiResponseCache = new Map();
+const apiResponseInflight = new Map();
+let dataCacheVersion = 0;
+
+function clearApiResponseCache() {
+  apiResponseCache.clear();
+  apiResponseInflight.clear();
+}
+
+function bumpDataCacheVersion() {
+  dataCacheVersion += 1;
+  clearApiResponseCache();
+}
+
+function normalizeCacheQueryValue(value) {
+  if (Array.isArray(value)) {
+    return value.map((v) => String(v)).sort().join(",");
+  }
+  if (value == null) return "";
+  return String(value);
+}
+
+function buildQueryCacheKey(query) {
+  return Object.keys(query)
+    .sort()
+    .map((key) => `${key}=${normalizeCacheQueryValue(query[key])}`)
+    .join("&");
+}
+
+function buildDataCacheKey(prefix, query = {}, extra = "") {
+  return `${prefix}:v${dataCacheVersion}:${buildQueryCacheKey(query)}:${extra}`;
+}
+
+function getApiResponseCache(key) {
+  const cached = apiResponseCache.get(key);
+  if (!cached) return null;
+  if (cached.expiresAt <= Date.now()) {
+    apiResponseCache.delete(key);
+    return null;
+  }
+  return cached.payload;
+}
+
+function setApiResponseCache(key, payload, ttlMs) {
+  if (!Number.isFinite(ttlMs) || ttlMs <= 0) return;
+
+  let serialized;
+  try {
+    serialized = JSON.stringify(payload);
+  } catch {
+    return;
+  }
+
+  const bytes = Buffer.byteLength(serialized, "utf8");
+  if (bytes > API_RESPONSE_CACHE_MAX_BYTES) {
+    return;
+  }
+
+  apiResponseCache.set(key, {
+    payload,
+    expiresAt: Date.now() + ttlMs
+  });
+
+  while (apiResponseCache.size > API_RESPONSE_CACHE_MAX_ENTRIES) {
+    const oldestKey = apiResponseCache.keys().next().value;
+    if (oldestKey == null) break;
+    apiResponseCache.delete(oldestKey);
+  }
+}
+
+async function respondWithCachedJson(res, key, ttlMs, compute) {
+  const cached = getApiResponseCache(key);
+  if (cached != null) {
+    res.set("X-Server-Cache", "HIT");
+    return res.json(cached);
+  }
+
+  let inflight = apiResponseInflight.get(key);
+  let status = "COALESCED";
+  if (!inflight) {
+    status = "MISS";
+    inflight = Promise.resolve()
+      .then(compute)
+      .then((payload) => {
+        setApiResponseCache(key, payload, ttlMs);
+        return payload;
+      })
+      .finally(() => {
+        apiResponseInflight.delete(key);
+      });
+    apiResponseInflight.set(key, inflight);
+  }
+
+  const payload = await inflight;
+  res.set("X-Server-Cache", status);
+  return res.json(payload);
+}
+
 function resolveDbPath() {
   if (process.env.DB_PATH && process.env.DB_PATH.trim().length > 0) {
     const configured = process.env.DB_PATH.trim();
@@ -106,6 +207,7 @@ async function pollOnce() {
   const cutoff = ts - RETENTION_HOURS * 3600;
   const pruned = pruneOld(db, cutoff);
   const atcPruned = pruneOldAtc(db, cutoff);
+  bumpDataCacheVersion();
   console.log(`[collector] ts=${ts} pilots=${pilots.length} inserted=${count} atc=${atc.length} atc-inserted=${atcCount} pruned=${pruned} atc-pruned=${atcPruned}`);
 }
 
@@ -137,6 +239,9 @@ async function syncEventsOnce(force = false) {
     const body = await response.json();
     const items = Array.isArray(body?.data) ? body.data : [];
     const changes = upsertEvents(db, items, ts);
+    if (changes > 0) {
+      bumpDataCacheVersion();
+    }
     lastEventsSyncTs = ts;
     console.log(`[events] fetched=${items.length} upserted=${changes} latestNum=${safeNum}`);
     return items.length;
@@ -194,14 +299,21 @@ async function startCollector() {
   runPollCycle();
 }
 
-app.get("/api/meta", (req, res) => {
-  const meta = getRangeMeta(db);
-  res.json({
-    ...meta,
-    retentionHours: RETENTION_HOURS,
-    pollIntervalSeconds: POLL_INTERVAL_SECONDS,
-    nowTs: nowTs()
-  });
+app.get("/api/meta", async (req, res) => {
+  try {
+    const key = buildDataCacheKey("meta");
+    return await respondWithCachedJson(res, key, 4000, () => {
+      const meta = getRangeMeta(db);
+      return {
+        ...meta,
+        retentionHours: RETENTION_HOURS,
+        pollIntervalSeconds: POLL_INTERVAL_SECONDS,
+        nowTs: nowTs()
+      };
+    });
+  } catch (e) {
+    return res.status(500).json({ error: "meta query failed", message: String(e?.message || e) });
+  }
 });
 
 app.get("/api/events", async (req, res) => {
@@ -215,14 +327,23 @@ app.get("/api/events", async (req, res) => {
     const to = typeof req.query.to === "string" ? req.query.to : null;
     const limit = parseInt(req.query.limit || "500", 10);
     const includeWithoutData = req.query.includeWithoutData === "1" || req.query.includeWithoutData === "true";
-    const rows = getStoredEvents(db, from, to, limit, !includeWithoutData);
-    res.json({ from, to, limit, includeWithoutData, rows });
+
+    if (refresh) {
+      const rows = getStoredEvents(db, from, to, limit, !includeWithoutData);
+      return res.set("X-Server-Cache", "BYPASS").json({ from, to, limit, includeWithoutData, rows });
+    }
+
+    const key = buildDataCacheKey("events", req.query);
+    return await respondWithCachedJson(res, key, 20000, () => {
+      const rows = getStoredEvents(db, from, to, limit, !includeWithoutData);
+      return { from, to, limit, includeWithoutData, rows };
+    });
   } catch (e) {
     res.status(500).json({ error: "events query failed", message: String(e?.message || e) });
   }
 });
 
-app.get("/api/callsigns", (req, res) => {
+app.get("/api/callsigns", async (req, res) => {
   const now = nowTs();
   const since = parseInt(req.query.since || (now - 3600).toString(), 10);
   const until = parseInt(req.query.until || now.toString(), 10);
@@ -243,11 +364,19 @@ app.get("/api/callsigns", (req, res) => {
   );
   const minAltitude = req.query.minAltitude ? parseInt(req.query.minAltitude, 10) : null;
   const maxAltitude = req.query.maxAltitude ? parseInt(req.query.maxAltitude, 10) : null;
-  const rows = getCallsingsInRange(db, since, until, limit, airspaces, airports, minAltitude, maxAltitude);
-  res.json({ since, until, airspaces, airports, minAltitude, maxAltitude, rows });
+
+  try {
+    const key = buildDataCacheKey("callsigns", req.query);
+    return await respondWithCachedJson(res, key, 12000, () => {
+      const rows = getCallsingsInRange(db, since, until, limit, airspaces, airports, minAltitude, maxAltitude);
+      return { since, until, airspaces, airports, minAltitude, maxAltitude, rows };
+    });
+  } catch (e) {
+    return res.status(500).json({ error: "callsigns query failed", message: String(e?.message || e) });
+  }
 });
 
-app.get("/api/track/:callsign", (req, res) => {
+app.get("/api/track/:callsign", async (req, res) => {
   const now = nowTs();
   const callsign = req.params.callsign.toUpperCase();
   const since = parseInt(req.query.since || (now - 3600).toString(), 10);
@@ -269,11 +398,19 @@ app.get("/api/track/:callsign", (req, res) => {
   );
   const minAltitude = req.query.minAltitude ? parseInt(req.query.minAltitude, 10) : null;
   const maxAltitude = req.query.maxAltitude ? parseInt(req.query.maxAltitude, 10) : null;
-  const rows = getTrack(db, callsign, since, until, step, airspaces, airports, minAltitude, maxAltitude);
-  res.json({ callsign, since, until, step, airspaces, airports, minAltitude, maxAltitude, rows });
+
+  try {
+    const key = buildDataCacheKey("track", req.query, callsign);
+    return await respondWithCachedJson(res, key, 12000, () => {
+      const rows = getTrack(db, callsign, since, until, step, airspaces, airports, minAltitude, maxAltitude);
+      return { callsign, since, until, step, airspaces, airports, minAltitude, maxAltitude, rows };
+    });
+  } catch (e) {
+    return res.status(500).json({ error: "track query failed", message: String(e?.message || e) });
+  }
 });
 
-app.get("/api/snapshot", (req, res) => {
+app.get("/api/snapshot", async (req, res) => {
   const now = nowTs();
   const ts = parseInt(req.query.ts || now.toString(), 10);
   const window = parseInt(req.query.window || Math.max(5, Math.floor(POLL_INTERVAL_SECONDS / 2)).toString(), 10);
@@ -289,11 +426,19 @@ app.get("/api/snapshot", (req, res) => {
   );
   const minAltitude = req.query.minAltitude ? parseInt(req.query.minAltitude, 10) : null;
   const maxAltitude = req.query.maxAltitude ? parseInt(req.query.maxAltitude, 10) : null;
-  const rows = getSnapshotAt(db, ts, window, airspaces, airports, minAltitude, maxAltitude);
-  res.json({ ts, window, airspaces, airports, minAltitude, maxAltitude, rows });
+
+  try {
+    const key = buildDataCacheKey("snapshot", req.query);
+    return await respondWithCachedJson(res, key, 8000, () => {
+      const rows = getSnapshotAt(db, ts, window, airspaces, airports, minAltitude, maxAltitude);
+      return { ts, window, airspaces, airports, minAltitude, maxAltitude, rows };
+    });
+  } catch (e) {
+    return res.status(500).json({ error: "snapshot query failed", message: String(e?.message || e) });
+  }
 });
 
-app.get("/api/airspaces", (req, res) => {
+app.get("/api/airspaces", async (req, res) => {
   const now = nowTs();
   const since = parseInt(req.query.since || (now - 3600).toString(), 10);
   const until = parseInt(req.query.until || now.toString(), 10);
@@ -302,19 +447,19 @@ app.get("/api/airspaces", (req, res) => {
     return res.status(400).json(validation);
   }
   const limit = parseInt(req.query.limit || "2000", 10);
-  
-  const cached = getCached("airspaces", since, until, limit);
-  if (cached) {
-    return res.set("Cache-Control", "public, max-age=5").json({ since, until, rows: cached });
+
+  try {
+    const key = buildDataCacheKey("airspaces", req.query);
+    return await respondWithCachedJson(res.set("Cache-Control", "public, max-age=5"), key, 15000, () => {
+      const rows = getAirspacesInRange(db, since, until, limit);
+      return { since, until, rows };
+    });
+  } catch (e) {
+    return res.status(500).json({ error: "airspaces query failed", message: String(e?.message || e) });
   }
-  
-  const rows = getAirspacesInRange(db, since, until, limit);
-  setCached("airspaces", since, until, limit, rows);
-  res.set("Cache-Control", "public, max-age=5");
-  res.json({ since, until, rows });
 });
 
-app.get("/api/airports", (req, res) => {
+app.get("/api/airports", async (req, res) => {
   const now = nowTs();
   const since = parseInt(req.query.since || (now - 3600).toString(), 10);
   const until = parseInt(req.query.until || now.toString(), 10);
@@ -323,27 +468,35 @@ app.get("/api/airports", (req, res) => {
     return res.status(400).json(validation);
   }
   const limit = parseInt(req.query.limit || "3000", 10);
-  
-  const cached = getCached("airports", since, until, limit);
-  if (cached) {
-    return res.set("Cache-Control", "public, max-age=5").json({ since, until, rows: cached });
+
+  try {
+    const key = buildDataCacheKey("airports", req.query);
+    return await respondWithCachedJson(res.set("Cache-Control", "public, max-age=5"), key, 15000, () => {
+      const rows = getAirportsInRange(db, since, until, limit);
+      return { since, until, rows };
+    });
+  } catch (e) {
+    return res.status(500).json({ error: "airports query failed", message: String(e?.message || e) });
   }
-  
-  const rows = getAirportsInRange(db, since, until, limit);
-  setCached("airports", since, until, limit, rows);
-  res.set("Cache-Control", "public, max-age=5");
-  res.json({ since, until, rows });
 });
 
-app.get("/api/atc-snapshot", (req, res) => {
+app.get("/api/atc-snapshot", async (req, res) => {
   const now = nowTs();
   const ts = parseInt(req.query.ts || now.toString(), 10);
   const window = parseInt(req.query.window || Math.max(5, Math.floor(POLL_INTERVAL_SECONDS / 2)).toString(), 10);
-  const rows = getAtcSnapshotAt(db, ts, window);
-  res.json({ ts, window, rows });
+
+  try {
+    const key = buildDataCacheKey("atc-snapshot", req.query);
+    return await respondWithCachedJson(res, key, 8000, () => {
+      const rows = getAtcSnapshotAt(db, ts, window);
+      return { ts, window, rows };
+    });
+  } catch (e) {
+    return res.status(500).json({ error: "atc snapshot query failed", message: String(e?.message || e) });
+  }
 });
 
-app.get("/api/preload-snapshots", (req, res) => {
+app.get("/api/preload-snapshots", async (req, res) => {
   const now = nowTs();
   const since = parseInt(req.query.since || (now - 3600).toString(), 10);
   const until = parseInt(req.query.until || now.toString(), 10);
@@ -407,80 +560,87 @@ app.get("/api/preload-snapshots", (req, res) => {
     });
   }
 
-  const from = since - window;
-  const to = until + window;
-  const availableTs = getSnapshotTimestampsInRange(db, from, to);
+  try {
+    const key = buildDataCacheKey("preload-snapshots", req.query);
+    return await respondWithCachedJson(res, key, 25000, () => {
+      const from = since - window;
+      const to = until + window;
+      const availableTs = getSnapshotTimestampsInRange(db, from, to);
 
-  const timestamps = [];
-  const rowsByTs = {};
-  const atcRowsByTs = {};
-  const sourceTsByBucket = {};
-  for (let ts = since; ts <= until; ts += step) {
-    timestamps.push(ts);
-    rowsByTs[ts] = [];
-    atcRowsByTs[ts] = [];
-  }
-
-  const bucketToSourceTs = new Map();
-  if (availableTs.length > 0) {
-    let index = 0;
-    for (const bucketTs of timestamps) {
-      while (index + 1 < availableTs.length && availableTs[index + 1] <= bucketTs) {
-        index += 1;
+      const timestamps = [];
+      const rowsByTs = {};
+      const atcRowsByTs = {};
+      const sourceTsByBucket = {};
+      for (let ts = since; ts <= until; ts += step) {
+        timestamps.push(ts);
+        rowsByTs[ts] = [];
+        atcRowsByTs[ts] = [];
       }
 
-      const left = availableTs[index];
-      const right = index + 1 < availableTs.length ? availableTs[index + 1] : null;
-      let nearest = left;
-      if (right != null && Math.abs(right - bucketTs) < Math.abs(left - bucketTs)) {
-        nearest = right;
+      const bucketToSourceTs = new Map();
+      if (availableTs.length > 0) {
+        let index = 0;
+        for (const bucketTs of timestamps) {
+          while (index + 1 < availableTs.length && availableTs[index + 1] <= bucketTs) {
+            index += 1;
+          }
+
+          const left = availableTs[index];
+          const right = index + 1 < availableTs.length ? availableTs[index + 1] : null;
+          let nearest = left;
+          if (right != null && Math.abs(right - bucketTs) < Math.abs(left - bucketTs)) {
+            nearest = right;
+          }
+
+          if (Math.abs(nearest - bucketTs) <= maxSourceAge) {
+            bucketToSourceTs.set(bucketTs, nearest);
+          }
+        }
       }
 
-      if (Math.abs(nearest - bucketTs) <= maxSourceAge) {
-        bucketToSourceTs.set(bucketTs, nearest);
+      const sourceTs = Array.from(new Set(Array.from(bucketToSourceTs.values())));
+      const pilotRows = getSnapshotsAtTimestamps(db, sourceTs, airspaces, airports, minAltitude, maxAltitude);
+      const atcRows = getAtcSnapshotsAtTimestamps(db, sourceTs);
+
+      const pilotBySourceTs = new Map();
+      for (const row of pilotRows) {
+        if (!pilotBySourceTs.has(row.ts)) pilotBySourceTs.set(row.ts, []);
+        pilotBySourceTs.get(row.ts).push(row);
       }
-    }
+
+      const atcBySourceTs = new Map();
+      for (const row of atcRows) {
+        if (!atcBySourceTs.has(row.ts)) atcBySourceTs.set(row.ts, []);
+        atcBySourceTs.get(row.ts).push(row);
+      }
+
+      for (const bucketTs of timestamps) {
+        const sourceTsForBucket = bucketToSourceTs.get(bucketTs);
+        if (sourceTsForBucket == null) continue;
+        sourceTsByBucket[bucketTs] = sourceTsForBucket;
+        rowsByTs[bucketTs] = (pilotBySourceTs.get(sourceTsForBucket) || []).map(({ ts, ...row }) => row);
+        atcRowsByTs[bucketTs] = (atcBySourceTs.get(sourceTsForBucket) || []).map(({ ts, ...row }) => row);
+      }
+
+      return {
+        since,
+        until,
+        step,
+        window,
+        maxSourceAge,
+        airspaces,
+        airports,
+        minAltitude,
+        maxAltitude,
+        timestamps,
+        sourceTsByBucket,
+        rowsByTs,
+        atcRowsByTs
+      };
+    });
+  } catch (e) {
+    return res.status(500).json({ error: "preload snapshots query failed", message: String(e?.message || e) });
   }
-
-  const sourceTs = Array.from(new Set(Array.from(bucketToSourceTs.values())));
-  const pilotRows = getSnapshotsAtTimestamps(db, sourceTs, airspaces, airports, minAltitude, maxAltitude);
-  const atcRows = getAtcSnapshotsAtTimestamps(db, sourceTs);
-
-  const pilotBySourceTs = new Map();
-  for (const row of pilotRows) {
-    if (!pilotBySourceTs.has(row.ts)) pilotBySourceTs.set(row.ts, []);
-    pilotBySourceTs.get(row.ts).push(row);
-  }
-
-  const atcBySourceTs = new Map();
-  for (const row of atcRows) {
-    if (!atcBySourceTs.has(row.ts)) atcBySourceTs.set(row.ts, []);
-    atcBySourceTs.get(row.ts).push(row);
-  }
-
-  for (const bucketTs of timestamps) {
-    const sourceTsForBucket = bucketToSourceTs.get(bucketTs);
-    if (sourceTsForBucket == null) continue;
-    sourceTsByBucket[bucketTs] = sourceTsForBucket;
-    rowsByTs[bucketTs] = (pilotBySourceTs.get(sourceTsForBucket) || []).map(({ ts, ...row }) => row);
-    atcRowsByTs[bucketTs] = (atcBySourceTs.get(sourceTsForBucket) || []).map(({ ts, ...row }) => row);
-  }
-
-  res.json({
-    since,
-    until,
-    step,
-    window,
-    maxSourceAge,
-    airspaces,
-    airports,
-    minAltitude,
-    maxAltitude,
-    timestamps,
-    sourceTsByBucket,
-    rowsByTs,
-    atcRowsByTs
-  });
 });
 
 const AIRSPACE_URLS = [
@@ -498,27 +658,6 @@ console.log('[init] TRACON_BOUNDARIES_FILES:', TRACON_BOUNDARIES_FILES);
 let airspaceCache = { ts: 0, data: null };
 let traconCache = { ts: 0, data: null };
 let atcCache = { ts: 0, positions: [] };
-
-const queryCache = new Map();
-const QUERY_CACHE_TTL_MS = 2000;
-
-function getCacheKey(prefix, since, until, limit) {
-  return `${prefix}:${since}:${until}:${limit}`;
-}
-
-function getCached(prefix, since, until, limit) {
-  const key = getCacheKey(prefix, since, until, limit);
-  const cached = queryCache.get(key);
-  if (cached && Date.now() - cached.ts < QUERY_CACHE_TTL_MS) {
-    return cached.data;
-  }
-  return null;
-}
-
-function setCached(prefix, since, until, limit, data) {
-  const key = getCacheKey(prefix, since, until, limit);
-  queryCache.set(key, { ts: Date.now(), data });
-}
 
 app.get("/api/airspace", async (req, res) => {
   try {
