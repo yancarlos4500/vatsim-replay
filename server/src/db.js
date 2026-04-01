@@ -330,6 +330,7 @@ export function upsertEvents(db, events, seenTs) {
   `);
 
   const run = db.transaction((rows) => {
+    let changes = 0;
     for (const e of rows) {
       if (!Number.isFinite(e?.id)) continue;
       if (typeof e?.name !== "string" || e.name.trim().length === 0) continue;
@@ -342,7 +343,7 @@ export function upsertEvents(db, events, seenTs) {
         ? Math.floor(Date.parse(e.end_time) / 1000)
         : null;
 
-      stmt.run({
+      const info = stmt.run({
         id: e.id,
         type: e.type ?? null,
         name: e.name,
@@ -361,12 +362,12 @@ export function upsertEvents(db, events, seenTs) {
         created_ts: seenTs,
         updated_ts: seenTs
       });
+      changes += info?.changes ?? 0;
     }
+    return changes;
   });
 
-  const before = db.totalChanges;
-  run(events);
-  return db.totalChanges - before;
+  return run(events) ?? 0;
 }
 
 export function insertSnapshots(db, ts, pilots) {
@@ -396,18 +397,35 @@ export function insertSnapshots(db, ts, pilots) {
 }
 
 export function pruneOld(db, cutoffTs) {
+  let total = 0;
+  while (true) {
+    const deleted = pruneOldBatch(db, cutoffTs, 5000);
+    total += deleted;
+    if (deleted === 0) break;
+  }
+  return total;
+}
+
+export function pruneOldBatch(db, cutoffTs, batchSize = 5000) {
+  const safeBatchSize = Number.isFinite(batchSize) ? Math.max(1, Math.min(100000, Math.floor(batchSize))) : 5000;
   const info = db.prepare(`
     DELETE FROM snapshots
-    WHERE ts < ?
-      AND NOT EXISTS (
-        SELECT 1
-        FROM events e
-        WHERE e.start_ts IS NOT NULL
-          AND e.end_ts IS NOT NULL
-          AND e.start_ts <= e.end_ts
-          AND snapshots.ts BETWEEN e.start_ts AND e.end_ts
-      )
-  `).run(cutoffTs);
+    WHERE rowid IN (
+      SELECT s.rowid
+      FROM snapshots s
+      WHERE s.ts < ?
+        AND NOT EXISTS (
+          SELECT 1
+          FROM events e
+          WHERE e.start_ts IS NOT NULL
+            AND e.end_ts IS NOT NULL
+            AND e.start_ts <= e.end_ts
+            AND s.ts BETWEEN e.start_ts AND e.end_ts
+        )
+      ORDER BY s.ts ASC
+      LIMIT ?
+    )
+  `).run(cutoffTs, safeBatchSize);
   decrementSnapshotStats(db, cutoffTs, info.changes ?? 0);
   return info.changes ?? 0;
 }
@@ -743,18 +761,35 @@ export function insertAtcSnapshots(db, ts, atcPositions) {
 }
 
 export function pruneOldAtc(db, cutoffTs) {
+  let total = 0;
+  while (true) {
+    const deleted = pruneOldAtcBatch(db, cutoffTs, 5000);
+    total += deleted;
+    if (deleted === 0) break;
+  }
+  return total;
+}
+
+export function pruneOldAtcBatch(db, cutoffTs, batchSize = 5000) {
+  const safeBatchSize = Number.isFinite(batchSize) ? Math.max(1, Math.min(100000, Math.floor(batchSize))) : 5000;
   const info = db.prepare(`
     DELETE FROM atc_snapshots
-    WHERE ts < ?
-      AND NOT EXISTS (
-        SELECT 1
-        FROM events e
-        WHERE e.start_ts IS NOT NULL
-          AND e.end_ts IS NOT NULL
-          AND e.start_ts <= e.end_ts
-          AND atc_snapshots.ts BETWEEN e.start_ts AND e.end_ts
-      )
-  `).run(cutoffTs);
+    WHERE rowid IN (
+      SELECT a.rowid
+      FROM atc_snapshots a
+      WHERE a.ts < ?
+        AND NOT EXISTS (
+          SELECT 1
+          FROM events e
+          WHERE e.start_ts IS NOT NULL
+            AND e.end_ts IS NOT NULL
+            AND e.start_ts <= e.end_ts
+            AND a.ts BETWEEN e.start_ts AND e.end_ts
+        )
+      ORDER BY a.ts ASC
+      LIMIT ?
+    )
+  `).run(cutoffTs, safeBatchSize);
   return info.changes ?? 0;
 }
 

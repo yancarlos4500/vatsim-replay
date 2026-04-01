@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 
 import { AirspaceMatcher } from "./airspaceMatcher.js";
 import { fetchAtcPositions, fetchPilots } from "./collector.js";
-import { getAirportsInRange, getAirspacesInRange, getAtcSnapshotAt, getAtcSnapshotsAtTimestamps, getCallsingsInRange, getRangeMeta, getSnapshotAt, getSnapshotTimestampsInRange, getSnapshotsAtTimestamps, getStoredEvents, getTrack, insertAtcSnapshots, insertSnapshots, openDb, pruneOld, pruneOldAtc, upsertEvents } from "./db.js";
+import { getAirportsInRange, getAirspacesInRange, getAtcSnapshotAt, getAtcSnapshotsAtTimestamps, getCallsingsInRange, getRangeMeta, getSnapshotAt, getSnapshotTimestampsInRange, getSnapshotsAtTimestamps, getStoredEvents, getTrack, insertAtcSnapshots, insertSnapshots, openDb, pruneOldAtcBatch, pruneOldBatch, upsertEvents } from "./db.js";
 
 // Define __dirname for ES modules
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
@@ -25,6 +25,8 @@ const EVENT_POLL_INTERVAL_SECONDS = parseInt(process.env.EVENT_POLL_INTERVAL_SEC
 const EVENTS_API_BASE = process.env.EVENTS_API_BASE || "https://my.vatsim.net/api/v2/events/latest";
 const API_RESPONSE_CACHE_MAX_ENTRIES = parseInt(process.env.API_RESPONSE_CACHE_MAX_ENTRIES || "300", 10);
 const API_RESPONSE_CACHE_MAX_BYTES = parseInt(process.env.API_RESPONSE_CACHE_MAX_BYTES || "10485760", 10);
+const PRUNE_BATCH_SIZE = parseInt(process.env.PRUNE_BATCH_SIZE || "5000", 10);
+const PRUNE_BATCHES_PER_POLL = parseInt(process.env.PRUNE_BATCHES_PER_POLL || "1", 10);
 
 const apiResponseCache = new Map();
 const apiResponseInflight = new Map();
@@ -205,8 +207,25 @@ async function pollOnce() {
   const count = insertSnapshots(db, ts, pilotsWithAirspace);
   const atcCount = insertAtcSnapshots(db, ts, atc);
   const cutoff = ts - RETENTION_HOURS * 3600;
-  const pruned = pruneOld(db, cutoff);
-  const atcPruned = pruneOldAtc(db, cutoff);
+  let pruned = 0;
+  let atcPruned = 0;
+
+  const pruneLoops = Number.isFinite(PRUNE_BATCHES_PER_POLL)
+    ? Math.max(1, Math.min(20, PRUNE_BATCHES_PER_POLL))
+    : 1;
+
+  const pruneBatchSize = Number.isFinite(PRUNE_BATCH_SIZE)
+    ? Math.max(100, Math.min(100000, PRUNE_BATCH_SIZE))
+    : 5000;
+
+  for (let i = 0; i < pruneLoops; i += 1) {
+    const pilotDeleted = pruneOldBatch(db, cutoff, pruneBatchSize);
+    const atcDeleted = pruneOldAtcBatch(db, cutoff, pruneBatchSize);
+    pruned += pilotDeleted;
+    atcPruned += atcDeleted;
+    if (pilotDeleted === 0 && atcDeleted === 0) break;
+  }
+
   bumpDataCacheVersion();
   console.log(`[collector] ts=${ts} pilots=${pilots.length} inserted=${count} atc=${atc.length} atc-inserted=${atcCount} pruned=${pruned} atc-pruned=${atcPruned}`);
 }
