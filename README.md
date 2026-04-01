@@ -83,3 +83,19 @@ bun install
 bun run build
 bun run start
 ```
+
+## Railway deployment layout
+
+For large SQLite volumes, do not run the collector in the same Railway web service that handles HTTP requests.
+
+Recommended split:
+- Web service:
+  - start command: `bun server/dist/index.js`
+  - env: `ENABLE_COLLECTOR=false`
+  - mounts the same volume for read access
+- Worker service:
+  - start command: `bun server/dist/index.js`
+  - env: `ENABLE_COLLECTOR=true`
+  - mounts the same volume for writes
+
+This keeps request handling responsive while the collector performs VATSIM fetches, airspace matching, inserts, and pruning in a separate process.

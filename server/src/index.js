@@ -29,6 +29,8 @@ const PRUNE_BATCH_SIZE = parseInt(process.env.PRUNE_BATCH_SIZE || "5000", 10);
 const PRUNE_BATCHES_PER_POLL = parseInt(process.env.PRUNE_BATCHES_PER_POLL || "1", 10);
 const PRUNE_INTERVAL_SECONDS = parseInt(process.env.PRUNE_INTERVAL_SECONDS || "900", 10);
 const COLLECTOR_STARTUP_DELAY_SECONDS = parseInt(process.env.COLLECTOR_STARTUP_DELAY_SECONDS || "5", 10);
+const ENABLE_COLLECTOR = process.env.ENABLE_COLLECTOR !== "0"
+  && process.env.ENABLE_COLLECTOR !== "false";
 
 const apiResponseCache = new Map();
 const apiResponseInflight = new Map();
@@ -933,5 +935,9 @@ app.listen(PORT, () => {
   syncEventsOnce(true).catch((e) => {
     console.warn("[events] startup sync failed:", e?.message || e);
   });
-  startCollector(); // Non-blocking; polls run in background
+  if (ENABLE_COLLECTOR) {
+    startCollector(); // Non-blocking; polls run in background
+  } else {
+    console.log("[collector] disabled by ENABLE_COLLECTOR");
+  }
 });
