@@ -27,6 +27,8 @@ const API_RESPONSE_CACHE_MAX_ENTRIES = parseInt(process.env.API_RESPONSE_CACHE_M
 const API_RESPONSE_CACHE_MAX_BYTES = parseInt(process.env.API_RESPONSE_CACHE_MAX_BYTES || "10485760", 10);
 const PRUNE_BATCH_SIZE = parseInt(process.env.PRUNE_BATCH_SIZE || "5000", 10);
 const PRUNE_BATCHES_PER_POLL = parseInt(process.env.PRUNE_BATCHES_PER_POLL || "1", 10);
+const PRUNE_INTERVAL_SECONDS = parseInt(process.env.PRUNE_INTERVAL_SECONDS || "900", 10);
+const COLLECTOR_STARTUP_DELAY_SECONDS = parseInt(process.env.COLLECTOR_STARTUP_DELAY_SECONDS || "5", 10);
 
 const apiResponseCache = new Map();
 const apiResponseInflight = new Map();
@@ -206,33 +208,46 @@ async function pollOnce() {
   const atc = await fetchAtcPositions();
   const count = insertSnapshots(db, ts, pilotsWithAirspace);
   const atcCount = insertAtcSnapshots(db, ts, atc);
-  const cutoff = ts - RETENTION_HOURS * 3600;
   let pruned = 0;
   let atcPruned = 0;
+  let ranPrune = false;
 
-  const pruneLoops = Number.isFinite(PRUNE_BATCHES_PER_POLL)
-    ? Math.max(1, Math.min(20, PRUNE_BATCHES_PER_POLL))
-    : 1;
+  const safePruneIntervalSeconds = Number.isFinite(PRUNE_INTERVAL_SECONDS)
+    ? Math.max(POLL_INTERVAL_SECONDS, PRUNE_INTERVAL_SECONDS)
+    : 900;
 
-  const pruneBatchSize = Number.isFinite(PRUNE_BATCH_SIZE)
-    ? Math.max(100, Math.min(100000, PRUNE_BATCH_SIZE))
-    : 5000;
+  if (RETENTION_HOURS > 0 && (lastPruneTs === 0 || (ts - lastPruneTs) >= safePruneIntervalSeconds)) {
+    ranPrune = true;
+    lastPruneTs = ts;
+    const cutoff = ts - RETENTION_HOURS * 3600;
+    const pruneLoops = Number.isFinite(PRUNE_BATCHES_PER_POLL)
+      ? Math.max(1, Math.min(20, PRUNE_BATCHES_PER_POLL))
+      : 1;
 
-  for (let i = 0; i < pruneLoops; i += 1) {
-    const pilotDeleted = pruneOldBatch(db, cutoff, pruneBatchSize);
-    const atcDeleted = pruneOldAtcBatch(db, cutoff, pruneBatchSize);
-    pruned += pilotDeleted;
-    atcPruned += atcDeleted;
-    if (pilotDeleted === 0 && atcDeleted === 0) break;
+    const pruneBatchSize = Number.isFinite(PRUNE_BATCH_SIZE)
+      ? Math.max(100, Math.min(100000, PRUNE_BATCH_SIZE))
+      : 5000;
+
+    for (let i = 0; i < pruneLoops; i += 1) {
+      const pilotDeleted = pruneOldBatch(db, cutoff, pruneBatchSize);
+      const atcDeleted = pruneOldAtcBatch(db, cutoff, pruneBatchSize);
+      pruned += pilotDeleted;
+      atcPruned += atcDeleted;
+      if (pilotDeleted === 0 && atcDeleted === 0) break;
+    }
   }
 
   bumpDataCacheVersion();
-  console.log(`[collector] ts=${ts} pilots=${pilots.length} inserted=${count} atc=${atc.length} atc-inserted=${atcCount} pruned=${pruned} atc-pruned=${atcPruned}`);
+  const pruneSummary = ranPrune
+    ? `pruned=${pruned} atc-pruned=${atcPruned}`
+    : "prune=skipped";
+  console.log(`[collector] ts=${ts} pilots=${pilots.length} inserted=${count} atc=${atc.length} atc-inserted=${atcCount} ${pruneSummary}`);
 }
 
 let pollTimer = null;
 let pollInProgress = false;
 let lastEventsSyncTs = 0;
+let lastPruneTs = 0;
 
 async function syncEventsOnce(force = false) {
   const ts = nowTs();
@@ -292,6 +307,9 @@ async function warmupGeoJsonCaches() {
 async function startCollector() {
   // Warm up GeoJSON caches in background
   warmupGeoJsonCaches();
+  const startupDelayMs = Number.isFinite(COLLECTOR_STARTUP_DELAY_SECONDS)
+    ? Math.max(0, COLLECTOR_STARTUP_DELAY_SECONDS) * 1000
+    : 5000;
 
   const runPollCycle = async () => {
     if (pollInProgress) {
@@ -315,7 +333,7 @@ async function startCollector() {
     }
   };
 
-  runPollCycle();
+  pollTimer = setTimeout(runPollCycle, startupDelayMs);
 }
 
 app.get("/api/meta", async (req, res) => {

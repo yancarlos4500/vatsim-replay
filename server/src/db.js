@@ -1,4 +1,4 @@
-import Database from "better-sqlite3";
+import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
@@ -196,8 +196,8 @@ function decrementSnapshotStats(db, cutoffTs, removedCount) {
 
 export function openDb(dbPath) {
   mkdirSync(dirname(dbPath), { recursive: true });
-  const db = new Database(dbPath);
-  db.pragma("journal_mode = WAL");
+  const db = new Database(dbPath, { create: true, strict: true });
+  db.exec("PRAGMA journal_mode = WAL;");
   db.exec(`
     CREATE TABLE IF NOT EXISTS snapshots (
       ts INTEGER NOT NULL,
@@ -220,7 +220,7 @@ export function openDb(dbPath) {
     );
     CREATE INDEX IF NOT EXISTS idx_snapshots_ts ON snapshots(ts);
     CREATE INDEX IF NOT EXISTS idx_snapshots_callsign_ts ON snapshots(callsign, ts);
-    
+
     CREATE TABLE IF NOT EXISTS atc_snapshots (
       ts INTEGER NOT NULL,
       callsign TEXT NOT NULL,
@@ -441,7 +441,7 @@ export function getCallsingsInRange(db, sinceTs, untilTs, limit = 2000, airspace
     `;
 
   const params = [sinceTs, untilTs];
-  
+
   const airspaceFilter = buildAirspaceFilterClause(airspaces);
   sql += airspaceFilter.clause;
   params.push(...airspaceFilter.params);
@@ -485,7 +485,7 @@ export function getTrack(db, callsign, sinceTs, untilTs, stepSeconds = 0, airspa
     `;
 
     const params = [stepSeconds, stepSeconds, callsign, sinceTs, untilTs];
-    
+
     const airspaceFilter = buildAirspaceFilterClause(airspaces);
     sql += airspaceFilter.clause;
     params.push(...airspaceFilter.params);

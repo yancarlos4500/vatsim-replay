@@ -5,6 +5,6 @@
     "buildCommand": "bun install && bun run build"
   },
   "deploy": {
-    "startCommand": "node server/dist/index.js"
+    "startCommand": "bun server/dist/index.js"
   }
 }

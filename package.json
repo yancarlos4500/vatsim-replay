@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "concurrently -n server,client -c cyan,magenta \"npm run dev --workspace=server\" \"npm run dev --workspace=client\"",
     "build": "node scripts/build-workspaces.js",
-    "start": "node server/dist/index.js"
+    "start": "bun server/dist/index.js"
   },
   "devDependencies": {
     "concurrently": "^9.0.0"
