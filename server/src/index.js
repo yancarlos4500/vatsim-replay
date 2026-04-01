@@ -701,7 +701,7 @@ app.get("/api/airspace", async (req, res) => {
     let lastStatus = null;
     let lastUrl = null;
     const FETCH_TIMEOUT_MS = 10000; // 10 second timeout
-    
+
     for (const url of AIRSPACE_URLS) {
       lastUrl = url;
       try {
@@ -712,7 +712,7 @@ app.get("/api/airspace", async (req, res) => {
           signal: controller.signal
         });
         clearTimeout(timer);
-        
+
         lastStatus = r.status;
         if (!r.ok) continue;
         const data = await r.json();
@@ -897,7 +897,7 @@ async function downloadAndStoreAllTracons() {
 }
 
 // Serve the built client in production
-const clientDist = resolve(join(process.cwd(), "../client/dist"));
+const clientDist = resolve(join(__dirname, "../../client/dist"));
 if (existsSync(clientDist)) {
   app.use(express.static(clientDist));
   app.get("*", (req, res) => {

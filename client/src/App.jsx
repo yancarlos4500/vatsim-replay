@@ -20,7 +20,7 @@ import {
   LinearProgress
 } from "@mui/material";
 import { createTheme, ThemeProvider } from "@mui/material/styles";
-import { getMeta, getCallsigns, getTrack, getAirspace, getTracon, getAirspaces, getAirports, getEvents, getPreloadSnapshots } from "./api";
+import { getMeta, getSnapshot, getCallsigns, getTrack, getAirspace, getTracon, getAirspaces, getAirports, getAtcSnapshot, getEvents, getPreloadSnapshots } from "./api";
 import { fmt, clamp, toDateTimeLocalValue, fromDateTimeLocalValue } from "./time";
 
 const panelTheme = createTheme({
@@ -176,6 +176,12 @@ function distanceLabelIcon(text) {
     iconSize: [1, 1],
     iconAnchor: [0, 0]
   });
+}
+
+function parseAltitudeInput(value) {
+  if (typeof value !== "string" || value.trim().length === 0) return null;
+  const parsed = parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 
@@ -594,25 +600,26 @@ useEffect(() => {
 }, [showTracon, tracon]);
 
   async function refreshSnapshot(ts) {
-    // Only use preloaded snapshots
     if (preloadedSnapshots.has(ts)) {
       setSnapshot(preloadedSnapshots.get(ts));
       return;
     }
-    
-    // If not preloaded, show empty snapshot
-    setSnapshot([]);
+
+    const airspacesStr = selectedAirspaces.join(",");
+    const minAlt = parseAltitudeInput(minAltitude);
+    const maxAlt = parseAltitudeInput(maxAltitude);
+    const r = await getSnapshot(ts, airspacesStr, airportFilterText, minAlt, maxAlt);
+    setSnapshot(r.rows || []);
   }
 
   async function refreshAtcSnapshot(ts) {
-    // Only use preloaded ATC snapshots
     if (preloadedAtcSnapshots.has(ts)) {
       setAtcSnapshot(preloadedAtcSnapshots.get(ts));
       return;
     }
-    
-    // If not preloaded, show empty snapshot
-    setAtcSnapshot([]);
+
+    const r = await getAtcSnapshot(ts);
+    setAtcSnapshot(r.rows || []);
   }
 
   async function refreshCallsigns() {
@@ -620,7 +627,9 @@ useEffect(() => {
     const until = rangeEnd ?? bounds.max;
     const since = rangeStart ?? bounds.min;
     const airspacesStr = selectedAirspaces.join(",");
-    const r = await getCallsigns(since, until, airspacesStr, airportFilterText);
+    const minAlt = parseAltitudeInput(minAltitude);
+    const maxAlt = parseAltitudeInput(maxAltitude);
+    const r = await getCallsigns(since, until, airspacesStr, airportFilterText, minAlt, maxAlt);
     setCallsigns((r.rows || []).map(x => x.callsign).sort());
   }
 
@@ -720,33 +729,33 @@ useEffect(() => {
       console.warn("[preload] range not initialized", { rangeStart, rangeEnd });
       return;
     }
-    
+
     // Ensure parameters are numbers
     const since = Number(rangeStart);
     const until = Number(rangeEnd);
     const step = Number(stepSeconds);
-    
+
     if (!Number.isFinite(since) || !Number.isFinite(until) || !Number.isFinite(step)) {
       console.error("[preload] invalid numeric parameters", { since, until, step, rangeStart, rangeEnd, stepSeconds });
       return;
     }
-    
+
     if (until < since) {
       console.error("[preload] end time before start time", { since, until });
       return;
     }
-    
+
     setIsPreloading(true);
     setPreloadProgress(0);
     let progressTimer = null;
-    
+
     try {
       const snapshots = new Map();
       const atcSnapshots = new Map();
 
       // Parse altitude filters
-      const minAlt = minAltitude && minAltitude.trim() ? parseInt(minAltitude, 10) : null;
-      const maxAlt = maxAltitude && maxAltitude.trim() ? parseInt(maxAltitude, 10) : null;
+      const minAlt = parseAltitudeInput(minAltitude);
+      const maxAlt = parseAltitudeInput(maxAltitude);
       const airspacesStr = selectedAirspaces.join(",");
 
       progressTimer = setInterval(() => {
@@ -813,7 +822,7 @@ useEffect(() => {
       }
 
       const firstPlayableTs = Array.from(snapshots.keys())[0] ?? null;
-      
+
       setPreloadedSnapshots(snapshots);
       setPreloadedAtcSnapshots(atcSnapshots);
       setT(firstPlayableTs ?? rangeStart); // Jump to first playable point (or range start)
@@ -836,7 +845,9 @@ useEffect(() => {
       const until = rangeEnd ?? bounds.max;
       const since = rangeStart ?? bounds.min;
       const airspacesStr = selectedAirspaces.join(",");
-      const r = await getTrack(cs, since, until, 15, airspacesStr, airportFilterText);
+      const minAlt = parseAltitudeInput(minAltitude);
+      const maxAlt = parseAltitudeInput(maxAltitude);
+      const r = await getTrack(cs, since, until, 15, airspacesStr, airportFilterText, minAlt, maxAlt);
       setTrackState((r.rows || []).map(p => [p.lat, p.lon]));
     } finally {
       setLoading(false);
@@ -1022,7 +1033,7 @@ useEffect(() => {
         if (isOnline) break;
       }
     }
-    
+
     return {
       color: isOnline ? "#00ff00" : "#666666",
       weight: isOnline ? 2 : 1,
@@ -1258,7 +1269,7 @@ useEffect(() => {
 
         <Paper variant="outlined" sx={{ p: 1.25, bgcolor: "rgba(255,255,255,0.03)" }}>
           <Typography variant="overline" sx={{ opacity: 1, color: "text.secondary" }}>Preload Snapshots</Typography>
-          
+
           {isPreloading ? (
             <Box sx={{ mb: 1 }}>
               <LinearProgress variant="determinate" value={preloadProgress} />
@@ -1266,40 +1277,40 @@ useEffect(() => {
             </Box>
           ) : (
             <Stack direction="row" spacing={1} sx={{ mb: 1.5 }}>
-              <Button 
-                variant={preloadedSnapshots.size > 0 ? "contained" : "outlined"} 
-                size="small" 
+              <Button
+                variant={preloadedSnapshots.size > 0 ? "contained" : "outlined"}
+                size="small"
                 fullWidth
-                onClick={() => loadSnapshotsForRange()} 
+                onClick={() => loadSnapshotsForRange()}
                 disabled={!bounds || rangeStart == null || rangeEnd == null || isPreloading}
               >
                 {preloadedSnapshots.size > 0 ? `✓ Loaded (${preloadedSnapshots.size})` : "Load Snapshots"}
               </Button>
             </Stack>
           )}
-          
+
           <Typography variant="overline" sx={{ opacity: 1, color: "text.secondary", mt: 1.5 }}>Playback</Typography>
           <Stack direction="row" spacing={1} sx={{ mb: 1 }}>
-            <Button 
-              variant="contained" 
-              size="small" 
-              onClick={() => setPlaying((p) => !p)} 
+            <Button
+              variant="contained"
+              size="small"
+              onClick={() => setPlaying((p) => !p)}
               disabled={!bounds || preloadedSnapshots.size === 0}
             >
               {playing ? "Pause" : "Play"}
             </Button>
-            <Button 
-              variant="outlined" 
-              size="small" 
-              onClick={() => bounds && setT(bounds.min)} 
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={() => bounds && setT(bounds.min)}
               disabled={!bounds}
             >
               Start
             </Button>
-            <Button 
-              variant="outlined" 
-              size="small" 
-              onClick={() => bounds && setT(bounds.max)} 
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={() => bounds && setT(bounds.max)}
               disabled={!bounds}
             >
               Live
@@ -1319,9 +1330,9 @@ useEffect(() => {
 
           <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1 }}>
             <Chip size="small" label={t ? fmt(t) : "—"} />
-            <Chip 
-              size="small" 
-              label={isPreloading ? `Loading ${preloadProgress}%` : (preloadedSnapshots.size > 0 ? "Preloaded" : "Preload Required")} 
+            <Chip
+              size="small"
+              label={isPreloading ? `Loading ${preloadProgress}%` : (preloadedSnapshots.size > 0 ? "Preloaded" : "Preload Required")}
               variant={preloadedSnapshots.size > 0 ? "filled" : "outlined"}
               color={preloadedSnapshots.size > 0 ? "success" : "default"}
             />
@@ -1455,10 +1466,10 @@ useEffect(() => {
 
           <FormControl fullWidth size="small" sx={{ mb: 1 }}>
             <InputLabel>Replay airspace(s)</InputLabel>
-            <Select 
-              label="Replay airspace(s)" 
+            <Select
+              label="Replay airspace(s)"
               multiple
-              value={selectedAirspaces} 
+              value={selectedAirspaces}
               onChange={(e) => setSelectedAirspaces(e.target.value)}
               onOpen={() => ensureAirspaceOptionsLoaded().catch(console.error)}
               renderValue={(selected) => selected.length === 0 ? "All airspaces" : selected.join(", ")}
