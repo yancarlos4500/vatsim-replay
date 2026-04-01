@@ -2,6 +2,9 @@ import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
+const AUTO_CREATE_OPTIONAL_INDEXES = process.env.AUTO_CREATE_OPTIONAL_INDEXES === "1"
+  || process.env.AUTO_CREATE_OPTIONAL_INDEXES === "true";
+
 function ensureSnapshotColumns(db) {
   const columns = db.prepare(`PRAGMA table_info(snapshots)`).all();
   const names = new Set(columns.map((c) => c.name));
@@ -129,6 +132,46 @@ function recomputeSnapshotStats(db) {
   return row;
 }
 
+function bootstrapSnapshotStats(db) {
+  const minRow = db.prepare(`
+    SELECT ts AS minTs
+    FROM snapshots
+    ORDER BY ts ASC
+    LIMIT 1
+  `).get();
+  const maxRow = db.prepare(`
+    SELECT ts AS maxTs
+    FROM snapshots
+    ORDER BY ts DESC
+    LIMIT 1
+  `).get();
+  const rowEstimate = db.prepare(`
+    SELECT COALESCE(MAX(rowid), 0) AS rows
+    FROM snapshots
+  `).get();
+
+  const row = {
+    minTs: minRow?.minTs ?? null,
+    maxTs: maxRow?.maxTs ?? null,
+    rows: rowEstimate?.rows ?? 0
+  };
+
+  db.prepare(`
+    INSERT INTO snapshot_stats (id, min_ts, max_ts, row_count)
+    VALUES (1, @minTs, @maxTs, @rows)
+    ON CONFLICT(id) DO UPDATE SET
+      min_ts = excluded.min_ts,
+      max_ts = excluded.max_ts,
+      row_count = excluded.row_count
+  `).run({
+    minTs: row.minTs,
+    maxTs: row.maxTs,
+    rows: row.rows
+  });
+
+  return row;
+}
+
 function ensureSnapshotStats(db) {
   const stats = db.prepare(`
     SELECT min_ts AS minTs, max_ts AS maxTs, row_count AS rows
@@ -137,8 +180,10 @@ function ensureSnapshotStats(db) {
   `).get();
 
   if (!stats) {
-    recomputeSnapshotStats(db);
+    return bootstrapSnapshotStats(db);
   }
+
+  return stats;
 }
 
 function incrementSnapshotStats(db, ts, rowCount) {
@@ -259,17 +304,19 @@ export function openDb(dbPath) {
   ensureSnapshotColumns(db);
   ensureEventColumns(db);
   ensureSnapshotStats(db);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_snapshots_airspace_ts ON snapshots(airspace, ts);`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_snapshots_departure_ts ON snapshots(departure, ts);`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_snapshots_destination_ts ON snapshots(destination, ts);`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_snapshots_ts_airspace ON snapshots(ts, airspace);`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_snapshots_ts_departure ON snapshots(ts, departure);`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_snapshots_ts_destination ON snapshots(ts, destination);`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_snapshots_ts_callsign ON snapshots(ts, callsign);`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_events_start_ts ON events(start_ts);`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_events_end_ts ON events(end_ts);`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_events_start_ts_end_ts ON events(start_ts, end_ts);`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_events_start_time_end_time ON events(start_time, end_time);`);
+  if (AUTO_CREATE_OPTIONAL_INDEXES) {
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_snapshots_airspace_ts ON snapshots(airspace, ts);`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_snapshots_departure_ts ON snapshots(departure, ts);`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_snapshots_destination_ts ON snapshots(destination, ts);`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_snapshots_ts_airspace ON snapshots(ts, airspace);`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_snapshots_ts_departure ON snapshots(ts, departure);`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_snapshots_ts_destination ON snapshots(ts, destination);`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_snapshots_ts_callsign ON snapshots(ts, callsign);`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_events_start_ts ON events(start_ts);`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_events_end_ts ON events(end_ts);`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_events_start_ts_end_ts ON events(start_ts, end_ts);`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_events_start_time_end_time ON events(start_time, end_time);`);
+  }
   return db;
 }
 
